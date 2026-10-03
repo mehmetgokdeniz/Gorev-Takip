@@ -1,0 +1,90 @@
+rules_version = '2';
+
+// ============================================================
+//  GOVREV TAKIP - FIRESTORE GUVENLIK KURALLARI
+// ============================================================
+//
+//  Kimlik dogrulama (Firebase Authentication) projede YOK.
+//  Bu nedenle kurallar, cihazda kurulu olan `yonetici_aktif`
+//  SharedPreferences bayragina guvenemez (istemci tarafinda
+//  degistirilebilir).
+//
+//  Guvenli varsayilan: Hicbir istemci dogrulanmadan veri
+//  OKUYAMAZ veya YAZAMAZ. Bu kural, uygulamanin su anki
+//  kimlik dogrulamasiz tasarimiyla uyumsuzdur; uygulamaya
+//  Firebase Authentication eklenene kadar veriler yalnizca
+//  guvenli (server-side) erisimle kullanilabilir.
+//
+//  Kimlik dogrulama eklendiginde asagidaki yorumlu kurallar
+//  aktiflestirilmelidir.
+// ============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ------------------------------------------------------------
+    //  Varsayilan: her sey kapali.
+    // ------------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ============================================================
+    //  GIRIS SONU (simdilik kapali)
+    // ============================================================
+    //
+    // Yonetici girisi Firebase Authentication ile yapilacak.
+    // Asagidaki kurallar, `request.auth.token.rol == 'yonetici'`
+    // ve `ogrenciId` claim'i olan bir auth yapisini varsayar.
+    //
+    // match /ayarlar/yonetici {
+    //   allow read, write: if request.auth != null
+    //                      && request.auth.token.rol == 'yonetici';
+    // }
+    //
+    // match /ogrenciler/{ogrenciId} {
+    //   // Ogrenci yalnizca kendi belgesini okuyup yazabilir.
+    //   // Konum alanlari (enlem/boylam/zaman) sunucuda guncellenir.
+    //   allow read: if request.auth != null
+    //                && (request.auth.uid == ogrenciId
+    //                    || request.auth.token.rol == 'yonetici');
+    //
+    //   allow create, delete: if request.auth != null
+    //                          && request.auth.token.rol == 'yonetici';
+    //
+    //   allow update: if request.auth != null
+    //                  && request.auth.token.rol == 'yonetici';
+    //
+    //   // Bildirim token'lari yalnizca kendi cihazina yazabilir.
+    //   match /tokens/{tokenId} {
+    //     allow read, write: if request.auth != null
+    //                        && (request.auth.uid == ogrenciId
+    //                            || request.auth.token.rol == 'yonetici');
+    //   }
+    // }
+    //
+    // match /gorevler/{gorevId} {
+    //   allow read: if request.auth != null
+    //                && (resource.data.ogrenciId == request.auth.uid
+    //                    || request.auth.token.rol == 'yonetici');
+    //
+    //   allow create, delete: if request.auth != null
+    //                          && request.auth.token.rol == 'yonetici';
+    //
+    //   // Odev gonderme: yalnizca durum ve icerik alanlari.
+    //   allow update: if request.auth != null
+    //                  && resource.data.ogrenciId == request.auth.uid
+    //                  && request.resource.data.ogrenciId == request.auth.uid
+    //                  && request.resource.data.diff(resource.data).affectedKeys()
+    //                     .hasOnly(['durum', 'aciklama', 'resimYollari']);
+    // }
+
+
+    // ============================================================
+    //  ALTYAPI DOGRULAMA
+    // ============================================================
+    //
+    // `firebase emulators:start --only firestore,functions` ile
+    // emuladorde test edilebilir.
+  }
+}

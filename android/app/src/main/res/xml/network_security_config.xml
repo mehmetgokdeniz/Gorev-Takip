@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Ag guvenlik yapilandirmasi.
+
+  - Cleartext (sifresiz HTTP) tamamen engellenir.
+  - Yalnizca guvenilir sistem sertifikalari kullanilir; kullanici
+    tarafi takilmis CA sertifikalari guvenilir kabul edilmez.
+  - Firebase / Google API'leri sistem guven deposundan dogrulanir.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Hata ayiklama sirasinda cleartext'e izin vermek icin
+         android/app/src/debug/AndroidManifest.xml dosyasinda
+         bir networkSecurityConfig debug override'i kullanin. -->
+</network-security-config>

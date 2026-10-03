@@ -1,0 +1,236 @@
+# ============================================================
+#  GIZLI BILGILER - ASLA COMMIT EDILMEZ
+# ============================================================
+
+# Ortam degiskenleri (gizli degerler)
+.env
+.env.*
+!.env.example
+
+# Ajan / arac hafizasi (proje kodu DEGILDIR, gizli deger icerebilir)
+.commandcode/
+.claude/
+.cursor/
+
+# Firebase / Google anahtarlari
+**/google-services.json
+**/GoogleService-Info.plist
+**/serviceAccountKey*.json
+**/service-account*.json
+**/*service*account*.json
+firebase-service-account.json
+*-firebase-adminsdk-*.json
+
+# Imzalama anahtarlari
+**/*.keystore
+**/*.jks
+**/*.p12
+**/*.pfx
+**/*.pem
+**/*.key
+key.properties
+**/key.properties
+android/keystore.properties
+
+# Cloud Functions runtime config
+functions/.runtimeconfig.json
+functions/.env
+functions/.env.*
+functions/service-account-key.json
+
+# Gerçek firestore.rules deploy edilmeden once kontrol edilir
+# (kural dosyasi version kontrolunde kalir, gizli degildir)
+
+
+# ============================================================
+#  BUILD CIKTILARI
+# ============================================================
+
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+build/
+coverage/
+doc/api/
+**/doc/api/
+
+# Android
+/android/app/debug/
+/android/app/profile/
+/android/app/release/
+/android/.gradle/
+/android/local.properties
+/android/.cxx/
+/android/app/.cxx/
+/android/gradlew
+/android/gradlew.bat
+/captures/
+*.hprof
+*.aab
+*.apk
+*.ipa
+*.dmg
+*.msix
+
+# Android sembol / obfuscation
+app.*.symbols
+app.*.map.json
+*.jks.bak
+
+# iOS
+/ios/Flutter/.last_build_id
+/ios/Flutter/ephemeral/
+/ios/Flutter/Generated.xcconfig
+/ios/Flutter/flutter_export_environment.sh
+/ios/Pods/
+/ios/.symlinks/
+/ios/Flutter/Flutter.podspec
+**/xcuserdata/
+**/*.xcuserstate
+**/*.xccheckout
+**/DerivedData/
+**/*.xcuserdatad
+**/*.moved-aside
+**/*.hmap
+**/*.ipa
+**/*.dSYM.zip
+**/*.dSYM
+
+# macOS
+/macos/Flutter/GeneratedPluginSwiftPackage/
+/macos/Pods/
+/macos/Flutter/ephemeral/
+**/xcuserdata/
+
+# Windows / Linux
+/windows/flutter/ephemeral/
+/linux/flutter/ephemeral/
+**/plugins/**/CMakeLists.txt
+
+
+# ============================================================
+#  IDE / EDITOR
+# ============================================================
+
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.idea_modules/
+.atomic/
+.history/
+*.swp
+*.swo
+*~
+*.code-workspace
+nbproject/
+
+# JetBrains
+*.hprof
+
+
+# ============================================================
+#  ISLETIM SISTEMI
+# ============================================================
+
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# Windows gizli
+$RECYCLE.BIN/
+*.lnk
+
+
+# ============================================================
+#  LOG / DEBUG
+# ============================================================
+
+*.log
+logs/
+*.pid
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+*.tmp
+*.bak
+*.orig
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+
+# ============================================================
+#  BAGIMLILIKLAR
+# ============================================================
+
+node_modules/
+jspm_packages/
+bower_components/
+functions/node_modules/
+.pnp
+.pnp.js
+
+
+# ============================================================
+#  TEST / KAPASITE
+# ============================================================
+
+coverage/
+lcov.info
+.nyc_output/
+.percy/
+test-results/
+playwright-report/
+blob-report/
+.playwright/
+
+# Android test ciktilari
+/android/app/src/test/
+/android/app/src/androidTest/
+
+
+# ============================================================
+#  GECICI DOSYALAR
+# ============================================================
+
+*.tmp
+*.bak
+*.orig
+*.swp
+*.temp
+.cache/
+.temp/
+.tmp/
+tmp/
+temp/
+
+
+# ============================================================
+#  MIGRATION DOSYALARI
+# ============================================================
+
+migrate_working_dir/
+/migrations/
+
+
+# ============================================================
+#  FIREBASE CLI
+# ============================================================
+
+.firebase/
+firebase-debug.*.log
+firestore-debug.log
+ui-debug.log
+/firestore/indexes.json.bak
+.runtimeconfig.json

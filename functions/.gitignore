@@ -1,0 +1,15 @@
+# functions/.env dosyasi ASLA commit edilmez.
+node_modules/
+.firebase/
+*.log
+
+# Gercek ortam degiskenleri
+.env
+.env.*
+!.env.example
+
+# Service account anahtarlari
+*service-account*.json
+*serviceAccount*.json
+*-firebase-adminsdk-*.json
+.runtimeconfig.json

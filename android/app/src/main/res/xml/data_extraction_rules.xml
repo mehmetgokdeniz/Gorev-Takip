@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ yedekleme/veri cikarim kurallari.
+
+  Guvenlik nedeniyle uygulama verisinin Google Drive'a veya
+  bulut yedeklemeye kopyalanmasi engellenir. Konum bilgisi
+  gibi hassas veri yedeklenirse cihaz kayboldugunda baska
+  bir cihazda geri yuklenebilir.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="file" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>
