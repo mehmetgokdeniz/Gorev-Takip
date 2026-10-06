@@ -1,4 +1,17 @@
-# Çoklu Öğrenci Takip Sistemi
+<div align="center">
+
+# 📚 Çoklu Öğrenci Takip Sistemi
+
+### Ödev yönetimi, fotoğraflı teslim, onay ve anlık bildirimler tek uygulamada
+
+![Flutter](https://img.shields.io/badge/Flutter-3.x-02569B?logo=flutter&logoColor=white)
+![Firebase](https://img.shields.io/badge/Firebase-Firestore%20%7C%20FCM-FFCA28?logo=firebase&logoColor=111111)
+![Platform](https://img.shields.io/badge/Platform-Android-3DDC84?logo=android&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green.svg)
+
+</div>
+
+---
 
 Yönetici ödev atar, öğrenci ödevi fotoğrafla gönderir, yönetici onaylar.
 Push bildirimleri cihazda düşer ve **dokununca doğrudan ilgili ödevi açar** —
@@ -7,6 +20,28 @@ Push bildirimleri cihazda düşer ve **dokununca doğrudan ilgili ödevi açar**
 Flutter (mobil) + Firebase (Firestore, Cloud Messaging, Cloud Functions).
 
 **Geliştiren:** Mehmet Gökdeniz
+
+## 🖼️ Uygulama akışı
+
+```mermaid
+flowchart LR
+    A[👨‍💼 Yönetici] -->|Görev atar| B[(🔥 Firestore)]
+    B -->|Canlı veri| C[👨‍🎓 Öğrenci]
+    C -->|Fotoğraflı teslim| B
+    B -->|FCM bildirimi| A
+    B -->|FCM bildirimi| C
+    A -->|Onaylar| D[✅ Tamamlandı]
+```
+
+### Kısa kullanım senaryosu
+
+1. Yönetici öğrenci hesabını oluşturur ve görev tanımlar.
+2. Öğrenci takvimden görevini açar, çalışmasını fotoğrafla yükler.
+3. Yönetici teslimi inceler ve onaylar.
+4. Her iki taraf anlık bildirim alır; bildirime dokununca ilgili görev açılır.
+
+> **Not:** Gerçek Firebase bağlantısı ve uygulama ayarları olmadan APK tam
+> işlevli çalışmaz. Kurulum adımları aşağıda ayrıntılı verilmiştir.
 
 ---
 
