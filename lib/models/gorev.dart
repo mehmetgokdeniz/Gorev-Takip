@@ -106,6 +106,30 @@ class Gorev {
     return '$bas – $son';
   }
 
+  /// Verilen gün, görevin tarih aralığı içinde mi?
+  ///
+  /// Takvim hücresi hangi günlerin renkli olacağını buradan belirler:
+  /// aralığın tamamı (başlangıç ve son gün dahil) sayılır, çünkü öğrenci
+  /// o günler boyunca çalışıyor demektir.
+  ///
+  /// Eski kayıtlarda başlangıç tarihi yoktur; o durumda tek tarih
+  /// (son tarih) kullanılır. Hiç tarih tanımlı değilse hiçbir günde
+  /// gösterilmez.
+  bool tarihAraliginaDahilMi(DateTime gun) {
+    final DateTime? bas = baslangicTarihi ?? sonTarihi;
+    final DateTime? son = sonTarihi ?? baslangicTarihi;
+    if (bas == null || son == null) return false;
+
+    final DateTime hedef = DateTime(gun.year, gun.month, gun.day);
+    final DateTime basGun = DateTime(bas.year, bas.month, bas.day);
+    final DateTime sonGun = DateTime(son.year, son.month, son.day);
+
+    // Aralık ters yazılmışsa (veri hatası) tek gün olarak ele al.
+    if (basGun.isAfter(sonGun)) return hedef == basGun;
+
+    return !hedef.isBefore(basGun) && !hedef.isAfter(sonGun);
+  }
+
   /// Son tarih geçti mi? (Tarih gün sonunda biter.)
   bool get sonTarihGecti {
     final DateTime? son = sonTarihi;

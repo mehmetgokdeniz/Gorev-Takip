@@ -12,8 +12,11 @@ import 'config/uygulama_ayarlari.dart';
 import 'models/gorev.dart';
 import 'services/bildirim_servisi.dart';
 import 'services/bildirim_yonlendirici.dart';
-import 'screens/bildirimler_ekrani.dart';
+import 'services/gorsel_onbellek.dart';
+import 'widgets/bildirim_rozeti.dart';
 import 'screens/gorev_detay_ekrani.dart';
+import 'screens/hakkinda_ekrani.dart';
+import 'screens/splash_ekrani.dart';
 import 'dart:io';
 import 'dart:convert';
 import 'dart:async';
@@ -30,9 +33,20 @@ void main() async {
     options: DefaultFirebaseOptions.currentPlatform,
   );
 
+  // Android bildirim kanalı. Kanal `importance: high` olmadan kurulursa
+  // bildirimler sessizce gömülür ve kullanıcı hiçbir şey görmez.
+  // Kanal bir kez kurulduktan sonra önemi değiştirilemeyeceği için
+  // uygulama her açılışta bu çağrı yapılır (idempotenttir).
+  await _bildirim.kanalKur();
+
   FirebaseMessaging.onBackgroundMessage(BildirimYonlendirici.arkaPlanIsleyici);
 
-  FirebaseMessaging.onMessage.listen(_yonlendirici.onMesaj);
+  FirebaseMessaging.onMessage.listen((mesaj) {
+    // Ön planda gelen bildirim iki yer gösterir: sistem bildirimi
+    // (uygulamayı kapatmadan da görünür) ve uygulama içi SnackBar.
+    _bildirim.onPlandaGoster(mesaj);
+    _yonlendirici.onMesaj(mesaj);
+  });
   FirebaseMessaging.onMessageOpenedApp.listen(_yonlendirici.onMesajAcildi);
 
   // Uygulama kapalıyken bildirimden açıldıysa veri ilk kareden
@@ -60,7 +74,9 @@ void main() async {
     );
   }
 
-  runApp(GorevTakipUygulamasi(baslangicEkrani: baslangicEkrani));
+  runApp(GorevTakipUygulamasi(
+    baslangicEkrani: SplashEkrani(baslangicEkrani: baslangicEkrani),
+  ));
 
   // İlk kare bittikten sonra bekleyen bildirimi işle.
   WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -100,19 +116,25 @@ class GorevTakipUygulamasi extends StatelessWidget {
   }
 }
 
-// Yardımcı: Base64 görsel gösterici
+// Yardımcı: Base64 / uzak görsel gösterici.
+//
+// Önceden `Image.memory(base64Decode(...))` her `build()` çağrısında
+// yeniden decode ediyordu; liste kaydırıldıkça aynı fotoğraf onlarca kez
+// çözülüyordu. Artık çözüm bir kez yapılıp `GorselOnbellek`'e yazılıyor.
 Widget bulutGorselCikar(String base64Str, {double? width, double? height, BoxFit fit = BoxFit.cover}) {
   if (base64Str.isEmpty) {
-    return const Icon(Icons.person, size: 40, color: Colors.white70);
+    return const SizedBox(
+      width: 40,
+      height: 40,
+      child: Icon(Icons.person, size: 40, color: Colors.white70),
+    );
   }
-  try {
-    if (base64Str.startsWith('http')) {
-      return Image.network(base64Str, width: width, height: height, fit: fit, errorBuilder: (c, o, s) => const Icon(Icons.error));
-    }
-    return Image.memory(base64Decode(base64Str), width: width, height: height, fit: fit);
-  } catch (e) {
-    return const Icon(Icons.broken_image);
-  }
+  return OnbellekliGorsel(
+    yol: base64Str,
+    genislik: width,
+    yukseklik: height,
+    fit: fit,
+  );
 }
 
 // Görseli Büyütme (Dialog) Fonksiyonu
@@ -122,7 +144,7 @@ void gorseliBuyut(BuildContext context, String base64Str) {
     builder: (context) => Dialog(
       backgroundColor: Colors.black,
       child: InteractiveViewer(
-        child: bulutGorselCikar(base64Str, fit: BoxFit.contain),
+        child: OnbellekliGorsel(yol: base64Str, fit: BoxFit.contain),
       ),
     ),
   );
@@ -153,6 +175,29 @@ class _GirisEkraniState extends State<GirisEkrani> {
     }
   }
 
+  /// Yönetici oturumu açıldığında yönlendiriciyi bilgilendirir.
+  ///
+  /// Bu çağrı ATLANIRSA bildirimlere dokunmak işe yaramaz: yönlendirici
+  /// aktif kullanıcıyı bilmediği için "aktif kullanıcı yok" deyip mesajı
+  /// düşürür ve hiçbir ekran açmaz. Giriş ekranındaki HER iki giriş
+  /// yolundan (biyometrik ve şifre) sonra çağrılmalıdır.
+  void _yoneticiyiEtkinlestir() {
+    _yonlendirici.aktifKullaniciyiAyarla(
+      belgeYolu: BildirimServisi.yoneticiKoleksiyon,
+      belgeId: BildirimServisi.yoneticiBelge,
+      yoneticiModu: true,
+    );
+  }
+
+  /// Öğrenci girişi başarılı olduğunda yönlendiriciyi bilgilendirir.
+  void _ogrenciyiEtkinlestir(String ogrenciId) {
+    _yonlendirici.aktifKullaniciyiAyarla(
+      belgeYolu: BildirimServisi.ogrenciKoleksiyon,
+      belgeId: ogrenciId,
+      yoneticiModu: false,
+    );
+  }
+
   Future<void> _yoneticiGirisAkisi(BuildContext context) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     bool biyometrikAktif = prefs.getBool('biyometrik_aktif') ?? true;
@@ -167,6 +212,7 @@ class _GirisEkraniState extends State<GirisEkrani> {
           );
           if (didAuthenticate) {
             await prefs.setBool('yonetici_aktif', true);
+            _yoneticiyiEtkinlestir();
             if (context.mounted) {
               Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => const YoneticiPaneli()));
             }
@@ -229,6 +275,7 @@ class _GirisEkraniState extends State<GirisEkrani> {
 
     SharedPreferences prefs = await SharedPreferences.getInstance();
     await prefs.setBool('yonetici_aktif', true);
+    _yoneticiyiEtkinlestir();
 
     if (!dialogContext.mounted) return;
 
@@ -340,6 +387,7 @@ class _GirisEkraniState extends State<GirisEkrani> {
                   if (doc.exists) {
                     SharedPreferences prefs = await SharedPreferences.getInstance();
                     await prefs.setString('aktif_ogrenci_id', girilenId);
+                    _ogrenciyiEtkinlestir(girilenId);
                     if (dialogContext.mounted) {
                       Navigator.pop(dialogContext);
                       Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => OgrenciPaneli(ogrenciId: girilenId)));
@@ -410,6 +458,16 @@ class _GirisEkraniState extends State<GirisEkrani> {
                   label: const Text('Öğrenci Girişi', style: TextStyle(fontSize: 16, color: Colors.white, fontWeight: FontWeight.bold)),
                 ),
               ),
+              const SizedBox(height: 24),
+              TextButton.icon(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const HakkindaEkrani()),
+                ),
+                icon: const Icon(Icons.info_outline, size: 16),
+                label: const Text('Hakkında'),
+                style: TextButton.styleFrom(foregroundColor: Colors.grey),
+              ),
             ],
           ),
         ),
@@ -429,9 +487,39 @@ class YoneticiPaneli extends StatefulWidget {
 }
 
 class _YoneticiPaneliState extends State<YoneticiPaneli> {
+  /// Öğrenci listesi stream'i.
+  ///
+  /// ÖNEMLİ: Bu stream `build()` içinde oluşturulursa her yeniden
+  /// çizimde YENI abonelik kurulur ve eskisi atılır. Asenkron ilk veri
+  /// geldiğinde yeniden çizim tetiklenir, bu da tekrar abonelik kurulması
+  /// demektir — uygulama sürekli aynı veriyi yeniden ister ve akıcılık
+  /// düşer. Tek sefer oluşturup saklamak bu döngüyü keser.
+  late final Stream<List<Map<String, dynamic>>> _ogrencilerStream;
+
   @override
   void initState() {
     super.initState();
+
+    _ogrencilerStream = FirebaseFirestore.instance
+        .collection('ogrenciler')
+        .snapshots()
+        .map((anlik) =>
+            anlik.docs.map((d) => <String, dynamic>{
+                  ...d.data(),
+                  // Belge kimliği `data()` içinde değil; liste anahtarı
+                  // ve düzenleme/silme işlemleri için gerekiyor.
+                  'id': d.id,
+                }).toList());
+
+    // Yönetici oturumu açıldı: bildirim yönlendiricisi burada da
+    // bilgilendirilir. Uygulama yeniden başlatıldığında `main()` zaten
+    // ayarlıyor, ama bildirimden gelerek panele geçişte buraya düşer.
+    _yonlendirici.aktifKullaniciyiAyarla(
+      belgeYolu: BildirimServisi.yoneticiKoleksiyon,
+      belgeId: BildirimServisi.yoneticiBelge,
+      yoneticiModu: true,
+    );
+
     _bildirimTokeniniKaydet();
     _tokenDegisiminiDinle();
   }
@@ -449,6 +537,14 @@ class _YoneticiPaneliState extends State<YoneticiPaneli> {
       BildirimServisi.yoneticiKoleksiyon,
       BildirimServisi.yoneticiBelge,
     );
+  }
+
+  @override
+  void dispose() {
+    // Oturum değiştirirken panel sökülür; token aboneliği de düşsün,
+    // yoksa her girişte bir tane daha birikir.
+    _bildirim.abonelikleriIptalEt();
+    super.dispose();
   }
 
   Future<void> _cikisYap(BuildContext context) async {
@@ -594,74 +690,48 @@ class _YoneticiPaneliState extends State<YoneticiPaneli> {
 
   @override
   Widget build(BuildContext context) {
-    final CollectionReference<Map<String, dynamic>> ogrencilerKoleksiyonu =
-        FirebaseFirestore.instance.collection('ogrenciler');
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Yönetici Paneli', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: const Color(0xFF161B22),
         elevation: 0,
         actions: [
-          StreamBuilder<int>(
-            stream: _bildirim.okunmamisSayisi(
-              BildirimServisi.yoneticiKoleksiyon,
-              BildirimServisi.yoneticiBelge,
-            ),
-            builder: (context, snapshot) {
-              int okunmamis = snapshot.data ?? 0;
-              return Stack(
-                alignment: Alignment.center,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.notifications_outlined),
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const BildirimlerEkrani(
-                          belgeYolu: BildirimServisi.yoneticiKoleksiyon,
-                          belgeId: BildirimServisi.yoneticiBelge,
-                          onayVerilebilir: true,
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (okunmamis > 0)
-                    Positioned(
-                      right: 10,
-                      top: 10,
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: const BoxDecoration(color: Colors.redAccent, shape: BoxShape.circle),
-                        child: Text('$okunmamis', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                      ),
-                    ),
-                ],
-              );
-            },
+          const BildirimRozeti(
+            belgeYolu: BildirimServisi.yoneticiKoleksiyon,
+            belgeId: BildirimServisi.yoneticiBelge,
+            ogrenciGosterilsin: true,
+            onayVerilebilir: true,
           ),
           IconButton(icon: const Icon(Icons.settings_outlined), onPressed: () => _ayarPenceresiAc(context)),
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            tooltip: 'Hakkında',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const HakkindaEkrani()),
+            ),
+          ),
           IconButton(icon: const Icon(Icons.person_add_alt_1_outlined), onPressed: () => _ogrenciEkleVeyaDuzenle(context)),
           IconButton(icon: const Icon(Icons.logout, color: Colors.redAccent), onPressed: () => _cikisYap(context)),
         ],
       ),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: ogrencilerKoleksiyonu.snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
+      body: StreamBuilder<List<Map<String, dynamic>>>(
+        stream: _ogrencilerStream,
+        builder: (context, anlik) {
+          if (anlik.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
-          final docs = snapshot.data?.docs ?? [];
-          if (docs.isEmpty) {
+          final List<Map<String, dynamic>> ogrenciler = anlik.data ?? const [];
+          if (ogrenciler.isEmpty) {
             return const Center(child: Text('Henüz kayıtlı öğrenci yok.', style: TextStyle(color: Colors.grey)));
           }
 
           return ListView.builder(
             padding: const EdgeInsets.all(12),
-            itemCount: docs.length,
+            itemCount: ogrenciler.length,
             itemBuilder: (context, index) {
-              final veri = docs[index].data();
-              final ogrenciId = docs[index].id;
+              final Map<String, dynamic> veri = ogrenciler[index];
+              final ogrenciId = veri['id'] as String;
               final adSoyad = veri['adSoyad'] ?? 'İsimsiz';
               final profilResmi = veri['profilResmi'] ?? '';
 
@@ -748,11 +818,32 @@ class _YoneticiPaneliState extends State<YoneticiPaneli> {
 // ==========================================
 // 3. CANLI KONUM PANELİ
 // ==========================================
-class CanliKonumPaneli extends StatelessWidget {
+class CanliKonumPaneli extends StatefulWidget {
   final String ogrenciId;
   final String ogrenciAdi;
 
   const CanliKonumPaneli({super.key, required this.ogrenciId, required this.ogrenciAdi});
+
+  @override
+  State<CanliKonumPaneli> createState() => _CanliKonumPaneliState();
+}
+
+class _CanliKonumPaneliState extends State<CanliKonumPaneli> {
+  /// Konum belgesinin stream'i.
+  ///
+  /// GPS her 10 dakikada bir güncelleme yazdığı için bu ekran sık sık
+  /// yeniden çizilir. `build()` içinde kurulan stream her çizimde yeni
+  /// abonelik açıp eskisini bırakıyordu; `initState`'e taşındı.
+  late final Stream<DocumentSnapshot<Map<String, dynamic>>> _ogrenciStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _ogrenciStream = FirebaseFirestore.instance
+        .collection('ogrenciler')
+        .doc(widget.ogrenciId)
+        .snapshots();
+  }
 
   Future<void> _haritadaAc(double enlem, double boylam) async {
     final Uri googleMapsUrl = Uri.parse("https://www.google.com/maps/search/?api=1&query=$enlem,$boylam");
@@ -766,9 +857,9 @@ class CanliKonumPaneli extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('$ogrenciAdi - Canlı Konum'), backgroundColor: const Color(0xFF161B22)),
+      appBar: AppBar(title: Text('${widget.ogrenciAdi} - Canlı Konum'), backgroundColor: const Color(0xFF161B22)),
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-        stream: FirebaseFirestore.instance.collection('ogrenciler').doc(ogrenciId).snapshots(),
+        stream: _ogrenciStream,
         builder: (context, snapshot) {
           if (!snapshot.hasData) return const Center(child: CircularProgressIndicator());
 
@@ -793,7 +884,7 @@ class CanliKonumPaneli extends StatelessWidget {
                     child: Icon(konumKapali ? Icons.location_off : Icons.navigation_rounded, size: 64, color: konumKapali ? Colors.redAccent : Colors.tealAccent),
                   ),
                   const SizedBox(height: 24),
-                  Text(ogrenciAdi, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
+                  Text(widget.ogrenciAdi, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 8),
                   Text(
                     konumKapali ? "Konum kapalı veya alınamadı." : "GPS Konumu Aktif",
@@ -837,18 +928,138 @@ class CanliKonumPaneli extends StatelessWidget {
 // ==========================================
 // 4. ÖĞRENCİ DETAY PANELİ
 // ==========================================
-class OgrenciDetayPaneli extends StatelessWidget {
+class OgrenciDetayPaneli extends StatefulWidget {
   final String ogrenciId;
   final String ogrenciAdi;
 
   const OgrenciDetayPaneli({super.key, required this.ogrenciId, required this.ogrenciAdi});
+
+  @override
+  State<OgrenciDetayPaneli> createState() => _OgrenciDetayPaneliState();
+}
+
+class _OgrenciDetayPaneliState extends State<OgrenciDetayPaneli> {
+  String get ogrenciId => widget.ogrenciId;
+  String get ogrenciAdi => widget.ogrenciAdi;
+
+  late final CollectionReference<Map<String, dynamic>> _gorevlerKoleksiyonu;
+
+  /// Bildirimler öğrenci belgesinin altında tutulduğu için görev
+  /// silinirken o kayıtları da bulmak gerekiyor.
+  late final CollectionReference<Map<String, dynamic>> _ogrencilerKoleksiyonu;
+
+  /// Öğrencinin görev listesi. `initState`'te bir kez kurulur; `build()`
+  /// içinde kurulursa her yeniden çizimde yeniden abone olunur.
+  ///
+  /// Görevler stream tarafında `Gorev` modeline çevrilir: `itemBuilder`
+  /// saf bir liste okur, belge ayrıştırması yapmaz. Önceden her karede
+  /// `Gorev.dokumandan()` çağrılıyordu.
+  late final Stream<List<Gorev>> _gorevlerStream;
+
+  /// Onaylanmış bir görevi ve ona bağlı bildirim geçmişini siler.
+  ///
+  /// Görev silinince öğrencinin bildirim listesinde o göreve ait kayıtlar
+  /// kalırdı; tıklandığında "görev mevcut değil" durumuna düşerdi.
+  /// Bu yüzden bildirimler ve görev tek bir batch içinde birlikte silinir.
+  Future<void> _goreviSil(
+    BuildContext context, {
+    required String gorevId,
+    required String ogrenciId,
+    required String baslik,
+  }) async {
+    final bool? onay = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF161B22),
+        title: const Text('Ödevi Sil'),
+        content: Text('"$baslik" ödevi kalıcı olarak silinecek. Emin misiniz?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('İptal', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.redAccent,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Sil'),
+          ),
+        ],
+      ),
+    );
+
+    if (onay != true || !context.mounted) return;
+
+    try {
+      final DocumentReference<Map<String, dynamic>> gorevRef =
+          _gorevlerKoleksiyonu.doc(gorevId);
+
+      // Bildirimler görevin altında değil, öğrencinin belgesinin altında
+      // durur (`ogrenciler/{id}/bildirimler`). `gorevId` alanına göre
+      // sorgulanıp o göreve ait kayıtlar topluca silinir.
+      final CollectionReference<Map<String, dynamic>> bildirimlerKoleksiyonu =
+          _ogrencilerKoleksiyonu
+              .doc(ogrenciId)
+              .collection(BildirimServisi.bildirimlerAltKoleksiyon);
+
+      final QuerySnapshot<Map<String, dynamic>> bildirimler =
+          await bildirimlerKoleksiyonu
+              .where('gorevId', isEqualTo: gorevId)
+              .get();
+
+      final WriteBatch batch = FirebaseFirestore.instance.batch();
+      for (final QueryDocumentSnapshot<Map<String, dynamic>> b
+          in bildirimler.docs) {
+        batch.delete(b.reference);
+      }
+      batch.delete(gorevRef);
+      await batch.commit();
+
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('"$baslik" silindi.')),
+      );
+    } catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Ödev silinemedi: $e')),
+      );
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+
+    _gorevlerKoleksiyonu = FirebaseFirestore.instance.collection('gorevler');
+    _ogrencilerKoleksiyonu = FirebaseFirestore.instance.collection('ogrenciler');
+    _gorevlerStream = _gorevlerKoleksiyonu
+        .where('ogrenciId', isEqualTo: ogrenciId)
+        .snapshots()
+        .map((anlik) {
+      final List<Gorev> gorevler = anlik.docs.map(Gorev.dokumandan).toList();
+      // Firestore sıralaması olmadan belge sırası değişebilir; en yeni
+      // görev üstte kalsın diye istemci tarafında sıralanır. Bu sayede
+      // ek bir Firestore index'i gerekmez.
+      gorevler.sort((a, b) {
+        final DateTime? aZaman = a.olusturmaZamani;
+        final DateTime? bZaman = b.olusturmaZamani;
+        if (aZaman == null && bZaman == null) return 0;
+        if (aZaman == null) return 1;
+        if (bZaman == null) return -1;
+        return bZaman.compareTo(aZaman);
+      });
+      return gorevler;
+    });
+  }
 
   void _gorevEklePenceresi(BuildContext context) {
     final TextEditingController gorevCtrl = TextEditingController();
     final TextEditingController aciklamaCtrl = TextEditingController();
     DateTime secilenBaslangic = DateTime.now();
     DateTime secilenSon = DateTime.now();
-    final CollectionReference gorevlerKoleksiyonu = FirebaseFirestore.instance.collection('gorevler');
 
     showDialog(
       context: context,
@@ -957,7 +1168,7 @@ class OgrenciDetayPaneli extends StatelessWidget {
                     final DateTime bas = secilenBaslangic;
                     final DateTime son = secilenSon.isBefore(secilenBaslangic) ? secilenBaslangic : secilenSon;
 
-                    await gorevlerKoleksiyonu.add({
+                    await _gorevlerKoleksiyonu.add({
                       GorevAlanlari.ogrenciId: ogrenciId,
                       GorevAlanlari.baslik: gorevCtrl.text.trim(),
                       GorevAlanlari.durum: GorevDurumu.atanlandi.kod,
@@ -981,23 +1192,20 @@ class OgrenciDetayPaneli extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final CollectionReference<Map<String, dynamic>> gorevlerKoleksiyonu =
-        FirebaseFirestore.instance.collection('gorevler');
-
     return Scaffold(
       appBar: AppBar(title: Text('$ogrenciAdi - Görevler'), backgroundColor: const Color(0xFF161B22)),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: gorevlerKoleksiyonu.where('ogrenciId', isEqualTo: ogrenciId).snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-          final docs = snapshot.data?.docs ?? [];
-          if (docs.isEmpty) return const Center(child: Text('Bu öğrenciye henüz görev atanmamış.', style: TextStyle(color: Colors.grey)));
+      body: StreamBuilder<List<Gorev>>(
+        stream: _gorevlerStream,
+        builder: (context, anlik) {
+          if (anlik.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
+          final List<Gorev> gorevler = anlik.data ?? const [];
+          if (gorevler.isEmpty) return const Center(child: Text('Bu öğrenciye henüz görev atanmamış.', style: TextStyle(color: Colors.grey)));
 
           return ListView.builder(
             padding: const EdgeInsets.all(12),
-            itemCount: docs.length,
+            itemCount: gorevler.length,
             itemBuilder: (context, index) {
-              final Gorev gorev = Gorev.dokumandan(docs[index]);
+              final Gorev gorev = gorevler[index];
               final String docId = gorev.id;
               final GorevDurumu durum = gorev.durum;
               String aciklama = gorev.aciklama;
@@ -1049,10 +1257,24 @@ class OgrenciDetayPaneli extends StatelessWidget {
                           trailing: durum == GorevDurumu.onayBekliyor
                               ? ElevatedButton(
                                   style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-                                  onPressed: () => gorevlerKoleksiyonu.doc(docId).update({'durum': GorevDurumu.onaylandi.kod}),
+                                  onPressed: () => _gorevlerKoleksiyonu.doc(docId).update({'durum': GorevDurumu.onaylandi.kod}),
                                   child: const Text('Onayla'),
                                 )
-                              : Icon(durum == GorevDurumu.onaylandi ? Icons.check_circle : Icons.hourglass_top, color: durumRengi),
+                              : durum == GorevDurumu.onaylandi
+                                  // Silme yalnız onaylanan görevlerde: onay
+                                  // bekleyen veya yapılmayan bir ödev yanlışlıkla
+                                  // silinmemeli.
+                                  ? IconButton(
+                                      tooltip: 'Onaylanan ödevi sil',
+                                      icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 22),
+                                      onPressed: () => _goreviSil(
+                                        context,
+                                        gorevId: docId,
+                                        ogrenciId: ogrenciId,
+                                        baslik: gorev.baslik,
+                                      ),
+                                    )
+                                  : Icon(Icons.hourglass_top, color: durumRengi),
                         ),
                         if (aciklama.isNotEmpty) ...[
                           const Divider(color: Colors.white10),
@@ -1116,34 +1338,204 @@ class _OgrenciPaneliState extends State<OgrenciPaneli> {
       FirebaseFirestore.instance.collection('gorevler');
   final CollectionReference<Map<String, dynamic>> _ogrencilerKoleksiyonu =
       FirebaseFirestore.instance.collection('ogrenciler');
-  
+
   static const Duration gpsGuncellemeAraligi = Duration(minutes: 10);
 
-  StreamSubscription<DocumentSnapshot>? _ogrenciSubscription;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _ogrenciSubscription;
+
+  /// Takvim renklendirmesini besleyen görev aboneliği.
+  ///
+  /// `_gorevlerStream` ayrıca `build()` içindeki `StreamBuilder` tarafından
+  /// da dinlenir; bu ikinci abonelik kalvemi `_sonGorevler` doldurur.
+  /// Kayıt tutulmadığı takdirde `dispose()` sonrası da açık kalır ve her
+  /// oturum değişiminde birikiyordu — oturum değiştirme kasmasının
+  /// başlıca nedeni buydu.
+  StreamSubscription<List<Gorev>>? _gorevlerAbonelik;
   Timer? _gpsZamanlayici;
+
+  /// Görev listesi — `initState`'te bir kez kurulur, `build()` içinde değil.
+  ///
+  /// Önceden `build()` gövdesinde oluşturuluyordu; her yeniden çizimde
+  /// yeni bir Firestore aboneliği kurulup eskisi atılıyordu.
+  /// Stream verisi `List<Gorev>` olarak döner: belge ayrıştırması kare
+  /// başına değil, veri güncellemesi başına bir kez yapılır.
+  late final Stream<List<Gorev>> _gorevlerStream;
+
+  /// Öğrenci belgesi (ad, profil fotoğrafı, silinme durumu).
+  ///
+  /// Önceden hem `initState` içindeki silinme dinleyicisi hem de `build()`
+  /// içindeki `StreamBuilder` aynı belgeyi ayrı ayrı dinliyordu.
+  late final Stream<DocumentSnapshot<Map<String, dynamic>>> _ogrenciStream;
 
   DateTime secilenTarih = DateTime.now();
   late PageController _pageController;
   int _currentMonthIndex = 0;
 
+  /// Takvimde gösterilen yıl.
+  ///
+  /// Önceden `secilenTarih.year`'a bağlıydı ve kullanıcı yılı
+  /// değiştiremiyordu. Artık ayrı bir alan; AppBar'daki yıl başlığı
+  /// açılır listeden seçim yapıyor.
+  int _currentYear = DateTime.now().year;
+
   /// true iken görev listesi tüm görevleri gösterir (takvim gününe göre
   /// filtrelemez). Kullanıcı eski bir görevi aradığında veya bildirimden
   /// geldiğinde bu mod kullanılır.
-  bool _tumGorevlerMi = true;
+  ///
+  /// BAŞLANGIÇ DEĞERİ `false`: takvim açılışta görünür olmalıydı.
+  /// Önceden `true` idi ve ekran açılır açılmaz takvim yerine
+  /// "Tüm görevler gösteriliyor" bandı çıkıyordu.
+  bool _tumGorevlerMi = false;
 
-  void _seciliGuneGoreGoster() {
+  /// Bir ayın kaç haftalık satır gerektirdiğini döner (5 veya 6).
+  ///
+  /// Ayın 1'i hangi güne denk geliyorsa ve kaç gün var, birlikte
+  /// belirler. `DateTime.weekday` PZT=1 ... PAZ=7 olduğu için boş
+  /// öndeki hücre sayısı `startWeekday - 1`'dir.
+  int _takvimSatirSayisi({required int daysInMonth, required int startWeekday}) {
+    final int doluHucre = daysInMonth + (startWeekday - 1);
+    return (doluHucre / 7).ceil();
+  }
+
+  /// Hücrelerin en-boy oranını, ayın satır sayısına göre verir.
+  ///
+  /// Grid'in verilen yüksekliğe tam olarak sığması için oran
+  /// kullanılabilir alandan hesaplanır. Sabit oran (ör. kare) kullanılırsa
+  /// 5 satırlık ay ile 6 satırlık ay aynı hücre yüksekliğini ister ve
+  /// 31 günlük ayın altıncı satırı ekranın altında kalır — gün sayıları
+  /// görünmez ve aşağı kaydırma da gelmez.
+  double _takvimEnBoyOrani({
+    required double genislik,
+    required double yukseklik,
+    required int satirSayisi,
+  }) {
+    const double yatayBosluk = 12; // padding horizontal * 2
+    const double hucereAraligi = 6.0;
+    const double dikeyBosluk = 8; // padding vertical * 2
+
+    final double hucreGenisligi =
+        (genislik - yatayBosluk - hucereAraligi * 6) / 7;
+    final double kullanilabilirYukseklik = yukseklik - dikeyBosluk;
+    final double hucreYuksekligi =
+        (kullanilabilirYukseklik - hucereAraligi * (satirSayisi - 1)) /
+            satirSayisi;
+
+    // Alan çok dar kalırsa oran sıfıra düşerdi; alt sınır koyulur ki
+    // gün numarası en azından okunur bir yükseklik kazansın.
+    if (hucreYuksekligi <= 0) return 1.0;
+
+    final double oran = hucreGenisligi / hucreYuksekligi;
+    return oran.clamp(0.35, 2.5);
+  }
+
+  /// Takvimde o güne düşen görev sayısını bulur.
+///
+/// Görevler zaten bellekte ([_gorevlerStream] son verisi) olduğu için
+/// ek Firestore sorgusu yapılmaz. Gün, görevin başlangıç–son tarih
+/// aralığına düşüyorsa sayılır (öğrenci o gün çalışıyor demektir).
+  int _gununGorevSayisi(DateTime gun) {
+    return _sonGorevler
+        .where((gorev) => gorev.tarihAraliginaDahilMi(gun))
+        .length;
+  }
+
+  /// Takvim hücresinin alt rengi: günün durumuna göre.
+  Color _gunRengi(DateTime gun, {required bool secili}) {
+    if (secili) return Colors.deepPurpleAccent;
+
+    final int gorevSayisi = _gununGorevSayisi(gun);
+    if (gorevSayisi == 0) return Colors.transparent;
+
+    // Hepsi onaylandıysa yeşil, aksi hâlde turuncu.
+    final bool tamamlandi = _sonGorevler
+        .where((gorev) => gorev.tarihAraliginaDahilMi(gun))
+        .every((gorev) => gorev.durum == GorevDurumu.onaylandi);
+    return (tamamlandi ? Colors.greenAccent : Colors.orange).withValues(alpha: 0.22);
+  }
+
+  /// Takvim verilerinden son gelen görev listesi.
+  ///
+  /// Hücre renklendirmesi için gerekir; stream her güncellendiğinde
+  /// [_gorevlerStream]'in dinleyicisi bunu yeniler.
+  List<Gorev> _sonGorevler = const [];
+
+  void _tumGorevleriGoster() {
+    setState(() => _tumGorevlerMi = true);
+  }
+
+  void _takvimiGoster() {
+    // Bugüne dön: takvime geçildiğinde bugün seçili olsun.
+    final DateTime bugun = DateTime.now();
     setState(() {
       _tumGorevlerMi = false;
-      // Bugune don: bu gune ait olmayan bir tarih secili kalmis olabilir.
-      final DateTime bugun = DateTime.now();
-      secilenTarih = DateTime(bugun.year, bugun.month, bugun.day);
+      _currentYear = bugun.year;
       _currentMonthIndex = bugun.month - 1;
-      _pageController.jumpToPage(_currentMonthIndex);
+      secilenTarih = DateTime(bugun.year, bugun.month, bugun.day);
+    });
+
+    // Sayfa geçişi, PageView yeniden ağaca girdikten SONRA yapılmalı.
+    // `_tumGorevlerMi` true iken PageView hiç kurulmuyor; aynı karede
+    // `jumpToPage` çağrılırsa controller'ın bağlandığı viewport henüz yok
+    // ve takvim eski ayda/boş kalıyordu.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_pageController.hasClients) _pageController.jumpToPage(_currentMonthIndex);
+    });
+  }
+
+  /// AppBar'daki yıl başlığına dokununca yıl seçici açılır.
+  Future<void> _yilSeciciAc(BuildContext context) async {
+    final DateTime simdi = DateTime.now();
+    // Gelecek yıllara ve çok eski yıllara gidilmesin: ödevler
+    // bugünden sonra çok uzakta olamaz, geçmişe de birkaç yıl yeter.
+    final int ilkYil = simdi.year - 5;
+    final int sonYil = simdi.year + 1;
+
+    final List<int> yillar = List<int>.generate(
+      sonYil - ilkYil + 1,
+      (int i) => sonYil - i,
+    );
+
+    final int? secilen = await showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: const Color(0xFF161B22),
+      builder: (context) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: yillar
+              .map((int yil) => ListTile(
+                    title: Text(
+                      '$yil',
+                      style: TextStyle(
+                        fontWeight: yil == _currentYear ? FontWeight.bold : FontWeight.normal,
+                        color: yil == _currentYear ? Colors.deepPurpleAccent : Colors.white,
+                      ),
+                    ),
+                    trailing: yil == simdi.year
+                        ? const Text('bu yıl', style: TextStyle(color: Colors.grey, fontSize: 12))
+                        : null,
+                    onTap: () => Navigator.pop(context, yil),
+                  ))
+              .toList(),
+        ),
+      ),
+    );
+
+    if (secilen == null) return;
+
+    setState(() {
+      _currentYear = secilen;
+      // Seçili gün ayın sınırını aşıyorsa (ör. 31 Şubat) en yakın
+      // geçerli güne kırpılır; aksi hâde `DateTime` sessizce bir
+      // sonraki aya kayar ve takvim yanlış günü seçili gösterir.
+      final int gun = secilenTarih.day;
+      final int sonGun = DateTime(secilen, secilenTarih.month + 1, 0).day;
+      secilenTarih = DateTime(secilen, secilenTarih.month, gun > sonGun ? sonGun : gun);
     });
   }
 
   final List<String> aylarListesi = [
-    'OCAK', 'ŞUBAT', 'MART', 'NİSAN', 'MAYIS', 'HAZİRAN', 
+    'OCAK', 'ŞUBAT', 'MART', 'NİSAN', 'MAYIS', 'HAZİRAN',
     'TEMMUZ', 'AĞUSTOS', 'EYLÜL', 'EKİM', 'KASIM', 'ARALIK'
   ];
 
@@ -1151,11 +1543,34 @@ class _OgrenciPaneliState extends State<OgrenciPaneli> {
   void initState() {
     super.initState();
     _currentMonthIndex = secilenTarih.month - 1;
+    _currentYear = secilenTarih.year;
     _pageController = PageController(initialPage: _currentMonthIndex);
-    
+
+    _gorevlerStream = _gorevlerKoleksiyonu
+        .where('ogrenciId', isEqualTo: widget.ogrenciId)
+        .snapshots()
+        .map((anlik) => anlik.docs.map(Gorev.dokumandan).toList());
+
+    _ogrenciStream =
+        _ogrencilerKoleksiyonu.doc(widget.ogrenciId).snapshots();
+
+    _gorevlerAbonelik = _gorevlerStream.listen((List<Gorev> gorevler) {
+      // Takvim hücrelerinin rengi bu listeye bakar; `setState` yalnız
+      // ekran görünürken yapılır (milisaniyelik gecikmesi olmaz).
+      if (mounted) setState(() => _sonGorevler = gorevler);
+    });
+
     _ogrenciSilinmeDurumunuDinle();
     _ogrenciBildirimIzniAl();
     _bildirimTokeniniKaydet();
+
+    // Bildirimden doğrudan bu panele gelinirse (uygulama kapalıyken
+    // dokunuldu) yönlendirici aktif kullanıcıyı bilmiyor olabilir.
+    _yonlendirici.aktifKullaniciyiAyarla(
+      belgeYolu: BildirimServisi.ogrenciKoleksiyon,
+      belgeId: widget.ogrenciId,
+      yoneticiModu: false,
+    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _konumIznAlveBaslat();
@@ -1163,11 +1578,11 @@ class _OgrenciPaneliState extends State<OgrenciPaneli> {
   }
 
   void _ogrenciSilinmeDurumunuDinle() {
-    _ogrenciSubscription = _ogrencilerKoleksiyonu.doc(widget.ogrenciId).snapshots().listen((snapshot) async {
+    _ogrenciSubscription = _ogrenciStream.listen((snapshot) async {
       if (!snapshot.exists) {
         SharedPreferences prefs = await SharedPreferences.getInstance();
         await prefs.remove('aktif_ogrenci_id');
-        
+
         if (mounted) {
           Navigator.pushAndRemoveUntil(context, MaterialPageRoute(builder: (context) => const GirisEkrani()), (route) => false);
           ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Yönetici tarafından kaydınız silindi!'), backgroundColor: Colors.redAccent));
@@ -1180,7 +1595,9 @@ class _OgrenciPaneliState extends State<OgrenciPaneli> {
   void dispose() {
     _pageController.dispose();
     _ogrenciSubscription?.cancel();
+    _gorevlerAbonelik?.cancel();
     _gpsZamanlayici?.cancel();
+    _bildirim.abonelikleriIptalEt();
     super.dispose();
   }
 
@@ -1362,82 +1779,83 @@ class _OgrenciPaneliState extends State<OgrenciPaneli> {
     );
   }
 
-  // Ödevin ait olduğu tarih aralığına göre görevler filtrelenir.
-// Başlangıç ve son tarih arasındaki HER gün listelenir; eski kayıtlarda
-// başlangıç tarihi olmadığı için tek tarih (son tarih) kullanılır.
-List<QueryDocumentSnapshot<Map<String, dynamic>>> _gorevleriAraligaGoreFiltrele(
-  List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  /// Seçili güne düşen görevleri döndürür.
+///
+/// Önceden bu işlem `QueryDocumentSnapshot` üzerinde yapılıyor ve her
+/// çağrıda `Gorev.dokumandan()` ile belge yeniden ayrıştırılıyordu.
+/// Artık model üzerinde çalışır ve kare başına parse yoktur.
+List<Gorev> _gorevleriAraligaGoreFiltrele(
+  List<Gorev> gorevler,
   DateTime secilenTarih,
 ) {
-  final DateTime hedef = DateTime(secilenTarih.year, secilenTarih.month, secilenTarih.day);
-
-  return docs.where((doc) {
-    final Gorev gorev = Gorev.dokumandan(doc);
-
-    final DateTime? bas = gorev.baslangicTarihi ?? gorev.sonTarihi;
-    final DateTime? son = gorev.sonTarihi ?? gorev.baslangicTarihi;
-
-    // Tarih tanimli olmayan gorev hicbir gunde gosterilmez.
-    if (bas == null || son == null) return false;
-
-    final DateTime basGun = DateTime(bas.year, bas.month, bas.day);
-    final DateTime sonGun = DateTime(son.year, son.month, son.day);
-
-    return !hedef.isBefore(basGun) && !hedef.isAfter(sonGun);
-  }).toList();
+  return gorevler
+      .where((gorev) => gorev.tarihAraliginaDahilMi(secilenTarih))
+      .toList();
 }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(aylarListesi[_currentMonthIndex], style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 2)),
+        title: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              aylarListesi[_currentMonthIndex],
+              style: const TextStyle(fontWeight: FontWeight.bold, letterSpacing: 2),
+            ),
+            // Yıl başlığı tıklanabilir: takvimde yıl değiştirilemiyordu.
+            InkWell(
+              onTap: () => _yilSeciciAc(context),
+              borderRadius: BorderRadius.circular(6),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      '$_currentYear',
+                      style: const TextStyle(fontSize: 13, color: Colors.white70),
+                    ),
+                    const Icon(Icons.arrow_drop_down, size: 18, color: Colors.white70),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
         centerTitle: true,
         backgroundColor: const Color(0xFF161B22),
         automaticallyImplyLeading: false,
         actions: [
-          StreamBuilder<int>(
-            stream: _bildirim.okunmamisSayisi(
-              BildirimServisi.ogrenciKoleksiyon,
-              widget.ogrenciId,
+          // Takvim <-> tüm görevler geçişi düğmeye taşındı: önceden
+          // yalnız "Takvime dön" vardı, geri dönmenin yolu belirsizdi.
+          IconButton(
+            tooltip: _tumGorevlerMi ? 'Takvimi göster' : 'Tüm görevleri göster',
+            icon: Icon(
+              _tumGorevlerMi ? Icons.event : Icons.grid_view_rounded,
+              color: _tumGorevlerMi ? Colors.white : Colors.deepPurpleAccent,
             ),
-            builder: (context, snapshot) {
-              int okunmamis = snapshot.data ?? 0;
-              return Stack(
-                alignment: Alignment.center,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.notifications_outlined),
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => BildirimlerEkrani(
-                          belgeYolu: BildirimServisi.ogrenciKoleksiyon,
-                          belgeId: widget.ogrenciId,
-                        ),
-                      ),
-                    ),
-                  ),
-                  if (okunmamis > 0)
-                    Positioned(
-                      right: 10,
-                      top: 10,
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: const BoxDecoration(color: Colors.redAccent, shape: BoxShape.circle),
-                        child: Text('$okunmamis', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-                      ),
-                    ),
-                ],
-              );
-            },
+            onPressed: _tumGorevlerMi ? _takvimiGoster : _tumGorevleriGoster,
+          ),
+          BildirimRozeti(
+            belgeYolu: BildirimServisi.ogrenciKoleksiyon,
+            belgeId: widget.ogrenciId,
+          ),
+          IconButton(
+            icon: const Icon(Icons.info_outline),
+            tooltip: 'Hakkında',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => const HakkindaEkrani()),
+            ),
           ),
         ],
       ),
       body: Column(
         children: [
           StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-            stream: _ogrencilerKoleksiyonu.doc(widget.ogrenciId).snapshots(),
+            stream: _ogrenciStream,
             builder: (context, snapshot) {
               if (!snapshot.hasData) return const LinearProgressIndicator();
               var veri = snapshot.data!.data();
@@ -1462,22 +1880,19 @@ List<QueryDocumentSnapshot<Map<String, dynamic>>> _gorevleriAraligaGoreFiltrele(
             },
           ),
           if (_tumGorevlerMi) ...[
-            // Takvim gizlendiginde yerine goruntuleme secenekleri gosterilir.
+            // Takvim gizlendiğinde hangi modda olunduğu belirtilir;
+            // takvime dönmek için AppBar'daki düğme kullanılır.
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
               child: Row(
                 children: [
+                  const Icon(Icons.grid_view_rounded, size: 18, color: Colors.grey),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Tüm görevler gösteriliyor',
-                      style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+                      'Tüm görevler gösteriliyor — takvime dönmek için üstteki düğmeye dokun',
+                      style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
                     ),
-                  ),
-                  TextButton.icon(
-                    style: TextButton.styleFrom(foregroundColor: Colors.deepPurpleAccent),
-                    onPressed: _seciliGuneGoreGoster,
-                    icon: const Icon(Icons.event, size: 18),
-                    label: const Text('Takvime dön'),
                   ),
                 ],
               ),
@@ -1500,48 +1915,119 @@ List<QueryDocumentSnapshot<Map<String, dynamic>>> _gorevleriAraligaGoreFiltrele(
                 onPageChanged: (index) {
                   setState(() {
                     _currentMonthIndex = index;
-                    secilenTarih = DateTime(secilenTarih.year, index + 1, 1);
+                    // Seçili gün korunur ama yıl `_currentYear`'a bağlanır;
+                    // gün ayın sınırını aşıyorsa kırpılır (örn. 31 Şubat).
+                    final int gun = secilenTarih.day;
+                    final int sonGun = DateTime(_currentYear, index + 2, 0).day;
+                    secilenTarih = DateTime(
+                      _currentYear,
+                      index + 1,
+                      gun > sonGun ? sonGun : gun,
+                    );
                   });
                 },
-                itemBuilder: (context, monthIndex) {
-                  int daysInMonth = DateTime(secilenTarih.year, monthIndex + 2, 0).day;
-                  int startWeekday = DateTime(secilenTarih.year, monthIndex + 1, 1).weekday;
+itemBuilder: (context, monthIndex) {
+                  final int daysInMonth = DateTime(_currentYear, monthIndex + 2, 0).day;
+                  final int startWeekday = DateTime(_currentYear, monthIndex + 1, 1).weekday;
+                  final DateTime bugun = DateTime.now();
 
-                  return GridView.builder(
-                    physics: const NeverScrollableScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 7,
-                      childAspectRatio: 1.0,
-                      crossAxisSpacing: 6.0,
-                      mainAxisSpacing: 6.0,
-                    ),
-                    itemCount: daysInMonth + (startWeekday - 1),
-                    itemBuilder: (context, index) {
-                      if (index < startWeekday - 1) return const SizedBox.shrink();
-                      int dayNum = index - (startWeekday - 2);
-                      bool isSelected = secilenTarih.day == dayNum && secilenTarih.month == (monthIndex + 1);
-                      bool isToday = DateTime.now().day == dayNum && DateTime.now().month == (monthIndex + 1) && DateTime.now().year == secilenTarih.year;
+                  // Takvim çizimi 5 veya 6 satıra göre ölçeklenir.
+                  //
+                  // Önceden hücre yüksekliği sabit `childAspectRatio: 1.0`
+                  // idi; 31 günlük ayların altıncı satırı ekranın dışında
+                  // kalıyordu. Sabit en-boy oranı yüzünden hücreler
+                  // kısıtlanamayacağı için oran satır sayısına bağlı
+                  // hesaplanır: 5 satırlık ayda büyür, 6 satırlık ayda
+                  // küçülür. Böylece her ayın tamamı ekrana sığar.
+                  final int satirSayisi = _takvimSatirSayisi(
+                    daysInMonth: daysInMonth,
+                    startWeekday: startWeekday,
+                  );
 
-                      return GestureDetector(
-                        onTap: () => setState(() => secilenTarih = DateTime(secilenTarih.year, monthIndex + 1, dayNum)),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: isSelected ? Colors.deepPurpleAccent : (isToday ? Colors.grey.shade800 : Colors.transparent),
-                            borderRadius: BorderRadius.circular(10),
-                            border: isToday && !isSelected ? Border.all(color: Colors.deepPurpleAccent, width: 1.5) : null,
+                  return LayoutBuilder(
+                    builder: (context, kisitlar) {
+                      return GridView.builder(
+                        physics: const NeverScrollableScrollPhysics(),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 7,
+                          // Oran, ayın gerçekten kaç satır taşıdığına ve
+                          // ekranda ne kadar yer olduğuna göre hesaplanır;
+                          // böylece 31 günlük ayların alt satırı da görünür.
+                          childAspectRatio: _takvimEnBoyOrani(
+                            genislik: kisitlar.maxWidth,
+                            yukseklik: kisitlar.maxHeight,
+                            satirSayisi: satirSayisi,
                           ),
-                          child: Center(
-                            child: Text(
-                              '$dayNum',
-                              style: TextStyle(
-                                color: isSelected ? Colors.white : Colors.white70,
-                                fontWeight: isSelected || isToday ? FontWeight.bold : FontWeight.normal,
-                                fontSize: 14,
+                          crossAxisSpacing: 6.0,
+                          mainAxisSpacing: 6.0,
+                        ),
+                        itemCount: satirSayisi * 7,
+                        itemBuilder: (context, index) {
+                          if (index < startWeekday - 1) return const SizedBox.shrink();
+
+                          final int dayNum = index - (startWeekday - 2);
+
+                          // Bu ayın gün sayısını aşan hücreler boş kalır.
+                          if (dayNum > daysInMonth) return const SizedBox.shrink();
+
+                          final DateTime hucreTarihi = DateTime(_currentYear, monthIndex + 1, dayNum);
+
+                          final bool isSelected =
+                              secilenTarih.day == dayNum &&
+                              secilenTarih.month == (monthIndex + 1) &&
+                              secilenTarih.year == _currentYear;
+                          final bool isToday =
+                              bugun.day == dayNum &&
+                              bugun.month == (monthIndex + 1) &&
+                              bugun.year == _currentYear;
+
+                          final int gorevSayisi = _gununGorevSayisi(hucreTarihi);
+
+                          return GestureDetector(
+                            onTap: () => setState(() => secilenTarih = hucreTarihi),
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: _gunRengi(hucreTarihi, secili: isSelected),
+                                borderRadius: BorderRadius.circular(10),
+                                border: isToday && !isSelected
+                                    ? Border.all(color: Colors.deepPurpleAccent, width: 1.5)
+                                    : null,
+                              ),
+                              child: Stack(
+                                children: [
+                                  Center(
+                                    child: Text(
+                                      '$dayNum',
+                                      style: TextStyle(
+                                        color: isSelected ? Colors.white : Colors.white70,
+                                        fontWeight: isSelected || isToday
+                                            ? FontWeight.bold
+                                            : FontWeight.normal,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                  // Görev olan günlerde küçük nokta: kullanıcı
+                                  // takvime bakıp o günde işi olup olmadığını
+                                  // listede taramadan görür.
+                                  if (gorevSayisi > 0)
+                                    Positioned(
+                                      bottom: 4,
+                                      child: Container(
+                                        width: 5,
+                                        height: 5,
+                                        decoration: const BoxDecoration(
+                                          color: Colors.white70,
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
-                          ),
-                        ),
+                          );
+                        },
                       );
                     },
                   );
@@ -1552,17 +2038,19 @@ List<QueryDocumentSnapshot<Map<String, dynamic>>> _gorevleriAraligaGoreFiltrele(
           const Divider(height: 1, color: Colors.white10),
           Expanded(
             flex: 5,
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: _gorevlerKoleksiyonu.where('ogrenciId', isEqualTo: widget.ogrenciId).snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
-                final docs = snapshot.data?.docs ?? [];
+            child: StreamBuilder<List<Gorev>>(
+              stream: _gorevlerStream,
+              builder: (context, anlik) {
+                if (anlik.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                final List<Gorev> tumGorevler = anlik.data ?? const [];
 
-                // "Tümü" modunda aralik filtresi uygulanmaz: kullanici
-                // her gecmise, bildirimden gelen de her goreve ulasabilir.
-                final List<QueryDocumentSnapshot<Map<String, dynamic>>> liste = _tumGorevlerMi
-                    ? docs
-                    : _gorevleriAraligaGoreFiltrele(docs, secilenTarih);
+                // "Tümü" modunda aralık filtresi uygulanmaz: kullanıcı
+                // her geçmişe, bildirimden gelen de her göreve ulaşabilir.
+                final List<Gorev> liste = _tumGorevlerMi
+                    ? tumGorevler
+                    : _gorevleriAraligaGoreFiltrele(tumGorevler, secilenTarih);
 
                 if (liste.isEmpty) {
                   return Center(
@@ -1579,7 +2067,9 @@ List<QueryDocumentSnapshot<Map<String, dynamic>>> _gorevleriAraligaGoreFiltrele(
                   padding: const EdgeInsets.all(12),
                   itemCount: liste.length,
                   itemBuilder: (context, index) {
-                    final Gorev gorev = Gorev.dokumandan(liste[index]);
+                    // Model stream tarafında çözülmüş gelir; burada belge
+                    // ayrıştırma yapılmaz.
+                    final Gorev gorev = liste[index];
                     final String docId = gorev.id;
                     final GorevDurumu durum = gorev.durum;
 

@@ -132,6 +132,12 @@ class BildirimYonlendirici {
   void _gorevDetayiniAc(NavigatorState navigator, String gorevId) {
     // Üst üste ekran açmayı önle: aynı göreve ikinci kez dokunulursa
     // mevcut detay ekranının üstüne yeni bir tane yığılmasın.
+    //
+    // `canPop()` tek başına yeterli değil: kullanıcı detay ekranından
+    // geri dönüp başka bir ekrana geçmiş olabilir, o zaman bu koşul
+    // yanlışlıkla sağdaki ekranı kapatırdı. Ek olarak kimlik her
+    // açılışta sıfırlanır ki sonraki dokunuşlarda yanlış ekran
+    // hedeflenmesin.
     if (_aktifEkranGorevId == gorevId && navigator.canPop()) {
       navigator.pop();
     }
@@ -144,7 +150,10 @@ class BildirimYonlendirici {
           onayVerilebilir: _yoneticiModu,
         ),
       ),
-    );
+    ).then((_) {
+      // Detay ekranı kapandı: sonraki bildirim için hedef sıfırlanır.
+      if (_aktifEkranGorevId == gorevId) _aktifEkranGorevId = null;
+    });
   }
 
   void _bildirimListesiniAc(NavigatorState navigator) {
@@ -166,22 +175,28 @@ class BildirimYonlendirici {
 
   /// Bir öğrenci bildirimini okundu işaretleyip görev detayını açar.
   Future<void> bildirimiAc(Bildirim bildirim, BuildContext benzeri) async {
-    await BildirimServisi.instance.okunduIsaretle(
-      _aktifBelgeYolu!,
-      _aktifBelgeId!,
-      bildirim,
-    );
+    final String? belgeYolu = _aktifBelgeYolu;
+    final String? belgeId = _aktifBelgeId;
+
+    // Aktif kullanıcı bilinmiyorsa okundu işaretlenemez (hangi belgeye
+    // yazılacağı belli değil). Önceden burada `!` kullanılıyordu ve
+    // bildirimden gelen bir akışta uygulama çökebiliyordu.
+    if (belgeYolu == null || belgeId == null) {
+      debugPrint('Bildirim işaretlenemedi: aktif kullanıcı yok.');
+      mesajiYonlendir({
+        'tur': bildirim.tur.kod,
+        'gorevId': bildirim.gorevId,
+        'ogrenciId': bildirim.ogrenciId,
+      });
+      return;
+    }
+
+    await BildirimServisi.instance.okunduIsaretle(belgeYolu, belgeId, bildirim);
+
     mesajiYonlendir({
       'tur': bildirim.tur.kod,
       'gorevId': bildirim.gorevId,
       'ogrenciId': bildirim.ogrenciId,
     });
   }
-
-  /// Bildirim türüne göre kullanıcıya gösterilecek kısa bilgi.
-  static String turAciklamasi(BildirimTuru tur) => switch (tur) {
-        BildirimTuru.gorevAtanldi => 'Yeni bir görev atandı.',
-        BildirimTuru.onayaGonderildi => 'Bir ödev onaya gönderildi.',
-        BildirimTuru.onaylandi => 'Ödevin onaylandı.',
-      };
 }

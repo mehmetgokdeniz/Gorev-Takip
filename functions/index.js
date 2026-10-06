@@ -193,6 +193,7 @@ async function yoneticiyeBildir(baslik, govde, veri) {
   return bildir({
     hedefKoleksiyon: YONETICI_KOLEKSIYON,
     hedefBelge: YONETICI_BELGE,
+    tur: veri.tur,
     baslik,
     govde,
     gorevId: veri.gorevId,

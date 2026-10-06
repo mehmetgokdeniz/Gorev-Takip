@@ -6,20 +6,70 @@ Push bildirimleri cihazda düşer ve **dokununca doğrudan ilgili ödevi açar**
 
 Flutter (mobil) + Firebase (Firestore, Cloud Messaging, Cloud Functions).
 
+**Geliştiren:** Mehmet Gökdeniz
+
+---
+
+## İçindekiler
+
+- [Özellikler](#özellikler)
+- [Hızlı başlangıç](#hızlı-başlangıç)
+- [Bildirim akışı](#bildirim-akışı)
+- [Ekranlar](#ekranlar)
+- [Veri modeli](#veri-modeli)
+- [Yönetici girişi ve güvenlik](#yönetici-girişi-ve-güvenlik)
+- [Akıcılık (kasma) notları](#akıcılık-kasma-notları)
+- [Proje yapısı](#proje-yapısı)
+- [Test ve doğrulama](#test-ve-doğrulama)
+- [Bilinen sınırlar](#bilinen-sınırlar)
+- [Lisans](#lisans)
+
+---
+
+## Özellikler
+
+- **Yönetici paneli** — öğrenci ekleme/düzenleme/silme, görev atama, fotoğraflı teslimi görüntüleme, onaylama, onaylanan ödevi silme, canlı konum takibi
+- **Öğrenci paneli** — aylık takvim görünümü (takvim / tüm görevler modu), gün bazlı filtreleme, fotoğraflı ödev gönderimi
+- **Push bildirimleri** — görev atandığında, onaya gönderildiğinde ve onaylandığında; dokununca doğrudan ilgili ödeve açar
+- **Kalıcı bildirim geçmişi** — bildirimler Firestore'a da yazılır, cihaz değişse bile kaybolmaz
+- **Hakkında ekranı** — uygulama bilgisi ve kullanılan açık kaynaklı kütüphaneler
+- **Splash ekranı** — açılışta logo animasyonu, geliştiren bilgisi
+
 ---
 
 ## Hızlı başlangıç
 
-### 1) Bağımlılıklar
+### Gereksinimler
+
+| Araç | Sürüm |
+|---|---|
+| Flutter SDK | 3.x (Dart >= 3.0.0) |
+| Node.js | 18+ (Cloud Functions ve scriptler için) |
+| Firebase CLI | `npm i -g firebase-tools` |
+| Android SDK | Flutter'ın önerdiği sürüm |
+
+### 1) Bağımlılıkları kurun
 
 ```bash
+git clone https://github.com/mehmetgokdeniz/Gorev-Takip.git
+cd gorev_takibi
+
 flutter pub get
 cd functions && npm install && cd ..
 ```
 
-### 2) Gizli ayarlar
+### 2) Firebase projenizi bağlayın
 
-`.env` dosyaları Git'a **girmez**. Kopyalarını oluşturun:
+```bash
+flutterfire configure
+```
+
+Bu komut `lib/firebase_options.dart` dosyasını üretir/günceller. Projenizde
+Firestore ve Cloud Messaging etkin olmalıdır.
+
+### 3) Gizli ayarları hazırlayın
+
+`.env` dosyaları Git'a **girmaz** (`.gitignore` içinde). Kopyalarını oluşturun:
 
 ```bash
 # Proje kökü
@@ -38,20 +88,18 @@ node -e "console.log(require('crypto').createHash('sha256').update('YENI_SIFREN'
 > Orijinal şifre hiçbir yere yazılmaz — sadece bu özet saklanır.
 > Şifrenizi unutursanız Functions üzerinden sıfırlamanız gerekir.
 
-### 3) Derleme
+`.env` dosyasındaki alanlar:
 
-```bash
-node scripts/dart_define_uret.js --build
-```
+| Değişken | Nerede kullanılır | Not |
+|---|---|---|
+| `YONETICI_SIFRE_ADI` | Yalnız yerel sızdıntı taraması | APK'ya **gömülmez** |
+| `YONETICI_SIFRE_OZET` | Cloud Functions | Sunucunun beklediği özet |
+| `YONETICI_SIFRE_HASH` | APK'ya gömülür | Çevrimdışı yedek, görünür |
+| `YONETICI_DOGRULAMA_URL` | APK'ya gömülür | Deploy sonrası doldurulur |
+| `FIREBASE_*` | Bilgi amaçlı | `firebase_options.dart`'ta zaten var |
+| `GOOGLE_SERVICE_ACCOUNT_*` | Lokal emulator | Canlıda gerekmez |
 
-Bu komut `.env` içindeki değerleri okur ve `--dart-define` bayraklarını
-otomatik ekleyerek release APK'yı üretir. Çıktı:
-
-```
-build/app/outputs/flutter-apk/app-release.apk
-```
-
-### 4) Functions deploy
+### 4) Functions'ı deploy edin
 
 ```bash
 firebase deploy --only functions
@@ -66,6 +114,29 @@ YONETICI_DOGRULAMA_URL=https://<region>-<proje-id>.cloudfunctions.net/yoneticiSi
 Ayrıca Firebase Console → Functions → Environment variables bölümüne
 aynı `YONETICI_SIFRE_OZET` değerini tanımlayın (canlı ortam `.env`
 dosyasını okumaz).
+
+### 5) Derleme
+
+```bash
+node scripts/dart_define_uret.js --build
+```
+
+Bu komut `.env` içindeki değerleri okur ve `--dart-define` bayraklarını
+otomatik ekleyerek release APK'yı üretir. Çıktı:
+
+```
+build/app/outputs/flutter-apk/app-release.apk
+```
+
+> ⚠️ **Düz `flutter build apk --release` kullanmayın.** `--dart-define`
+> bayrağı olmadan derlenen APK'da şifre özeti boş gömülür ve yönetici
+> girişi sessizce başarısız olur. Her zaman yukarıdaki script'i kullanın.
+
+### 6) Çalıştırma (geliştirme)
+
+```bash
+flutter run
+```
 
 ---
 
@@ -88,11 +159,106 @@ sayısından gelir.
 
 **Dokunma davranışı** (`lib/services/bildirim_yonlendirici.dart`):
 
-- Uygulama ön plandayken → SnackBar çıkar, "Aç" ile göreve gidilir
+- Uygulama ön plandayken → sistem bildirimi + SnackBar çıkar, "Aç" ile göreve gidilir
 - Arka plandayken dokunuldu → doğrudan görev detayı açılır
 - Uygulama kapalıyken dokunuldu → ilk karede otomatik açılır
 
 Hedef ekran `lib/screens/gorev_detay_ekrani.dart`'dir.
+
+> **Aktif kullanıcı şarttır.** Yönlendirici, ekranı açabilmek için
+> kimin giriş yaptığını bilmelidir. Giriş sonrası
+> `aktifKullaniciyiAyarla()` çağrılır; bu çağrı eksikse bildirime
+> dokunulduğunda uygulama "aktif kullanıcı yok" deyip mesajı düşürür
+> ve hiçbir ekran açmaz.
+
+### Android bildirim kanalı
+
+Android 8+ her uygulamanın bildirim göndermek için bir kanala ihtiyacı
+vardır. Kanal `lib/services/bildirim_servisi.dart` içinde
+`kanalKur()` ile, uygulama her açılışta oluşturulur:
+
+```dart
+AndroidNotificationChannel(
+  'gorev_bildirimleri',
+  importance: Importance.high,
+)
+```
+
+> **Kanal önemi değiştirilemez.** Bir kanal bir kez oluşturulduktan
+> sonra `importance` değerini kullanıcı da uygulama da değiştiremez.
+> Bu yüzden baştan `high` ile kurulmalıdır — aksi hâlde bildirimler
+> sessizce gömülür ve kullanıcı hiçbir şey görmez.
+
+`channelId` değeri `functions/index.js` içindekiyle **birebir aynı**
+olmalıdır; iki taraf ayrışırsa bildirimler düşmez.
+
+---
+
+## Akıcılık (kasma) notları
+
+Üç ayrı yerde aynı hata vardı ve düzeltildi. Yeni kod yazarken
+bunları tekrarlamamak önemli:
+
+**1. Firestore stream'ini `build()` içinde oluşturmayın.**
+
+```dart
+// YANLIŞ — her yeniden çizimde yeni abonelik, eskisi atılır
+StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+  stream: koleksiyon.snapshots(),   // build() gövdesinde
+
+// DOĞRU — bir kez kurulur, ömür boyu saklanır
+late final Stream<List<Gorev>> _gorevlerStream;
+
+@override
+void initState() {
+  super.initState();
+  _gorevlerStream = koleksiyon.snapshots().map(...);
+}
+```
+
+`build()` içinde kurulan stream, gelen veri `setState` tetiklediği
+için yeniden çizimi tetikler; bu da yeniden abonelik demektir.
+
+**2. Belgeyi her karede ayrıştırmayın.**
+
+```dart
+// YANLIŞ — itemBuilder her çizimde parse eder
+final gorev = Gorev.dokumandan(docs[index]);
+
+// DOĞRU — stream tarafında bir kez çözülür
+_stream = koleksiyon.snapshots()
+    .map((s) => s.docs.map(Gorev.dokumandan).toList());
+```
+
+**3. Base64 görselleri `Image.memory` ile çözmeyin.**
+
+```dart
+// YANLIŞ — her karede base64Decode
+Image.memory(base64Decode(yol))
+
+// DOĞRU — bir kez çöz, önbellekten çiz
+OnbellekliGorsel(yol: yol, fit: BoxFit.cover)
+```
+
+`lib/services/gorsel_onbellek.dart` çözümü bir kez yapar, `ui.Image`
+olarak saklar ve `RawImage` ile çizer. En fazla 200 görsel tutar,
+aşanı en eskisi atılır.
+
+---
+
+## Ekranlar
+
+| Ekran | Dosya | Açıklama |
+|---|---|---|
+| Splash | `screens/splash_ekrani.dart` | Açılış animasyonu, geliştiren bilgisi |
+| Giriş | `main.dart` (`GirisEkrani`) | Yönetici (biyometrik/şifre) ve öğrenci girişi |
+| Yönetici paneli | `main.dart` (`YoneticiPaneli`) | Öğrenci listesi, ekleme, düzenleme, silme |
+| Öğrenci detayı | `main.dart` (`OgrenciDetayPaneli`) | Görev listesi, atama, onaylama, silme |
+| Canlı konum | `main.dart` (`CanliKonumPaneli`) | Öğrencinin anlık konumu |
+| Öğrenci paneli | `main.dart` (`OgrenciPaneli`) | Takvim + görev listesi, ödev gönderimi |
+| Görev detayı | `screens/gorev_detay_ekrani.dart` | Ödev ayrıntısı, onay/gönderim |
+| Bildirimler | `screens/bildirimler_ekrani.dart` | Bildirim geçmişi ve filtreler |
+| Hakkında | `screens/hakkinda_ekrani.dart` | Uygulama ve kütüphane bilgileri |
 
 ---
 
@@ -100,32 +266,39 @@ Hedef ekran `lib/screens/gorev_detay_ekrani.dart`'dir.
 
 ```
 lib/
-├── main.dart                     # Giriş ekranı, yönetici paneli, öğrenci paneli
-├── firebase_options.dart         # Firebase yapılandırması (üretilmiş)
+├── main.dart                       # Giriş ekranı, yönetici paneli, öğrenci paneli
+├── firebase_options.dart           # Firebase yapılandırması (üretilmiş)
 ├── config/
-│   └── uygulama_ayarlari.dart    # Şifre özeti, ortam değişkenleri
+│   ├── uygulama_ayarlari.dart      # Şifre özeti, ortam değişkenleri
+│   └── uygulama_bilgisi.dart       # Sürüm, geliştirici, kütüphane listesi
 ├── models/
-│   ├── gorev.dart                # Görev + durum + tarih aralığı
-│   └── bildirim.dart             # Bildirim + türleri
+│   ├── gorev.dart                  # Görev + durum + tarih aralığı
+│   └── bildirim.dart               # Bildirim + türleri
 ├── services/
-│   ├── bildirim_servisi.dart     # Token kaydı, bildirim listesi
-│   └── bildirim_yonlendirici.dart# Dokunma → ekran yönlendirmesi
-└── screens/
-    ├── bildirimler_ekrani.dart   # Uygulama içi bildirim listesi
-    └── gorev_detay_ekrani.dart   # Ödev + başlangıç/son tarih
+│   ├── bildirim_servisi.dart       # Kanal, token kaydı, bildirim listesi
+│   ├── bildirim_yonlendirici.dart  # Dokunma → ekran yönlendirmesi
+│   └── gorsel_onbellek.dart        # Base64 görsel önbelleği (kasma için)
+├── screens/
+│   ├── splash_ekrani.dart          # Açılış ekranı
+│   ├── hakkinda_ekrani.dart        # Hakkında + kütüphaneler
+│   ├── bildirimler_ekrani.dart     # Uygulama içi bildirim listesi
+│   └── gorev_detay_ekrani.dart     # Ödev + başlangıç/son tarih
+└── widgets/
+    └── bildirim_rozeti.dart        # AppBar bildirim düğmesi + rozet
 
 functions/
-├── index.js                      # Firestore trigger'ları, bildirim gönderimi
-├── sifre_dogrula.js              # Şifre doğrulama (sadece özet karşılaştırır)
-├── ortam.js                      # .env okuyucu (bağımlılıksız)
-└── .env.example                  # Şablon
+├── index.js                        # Firestore trigger'ları, bildirim gönderimi
+├── sifre_dogrula.js                # Şifre doğrulama (sadece özet karşılaştırır)
+├── ortam.js                        # .env okuyucu (bağımlılıksız)
+└── .env.example                    # Şablon
 
 scripts/
-├── ortam_yardimci.js             # Script'ler için ortak .env okuyucu
-├── dart_define_uret.js           # Derleme komutu üretir / derler
-├── sifre_testi.js                # Şifre doğrulama testleri
-├── apk_sizinti_taramasi.js       # APK sızıntı taraması
-└── functions_kontrol.js          # Trigger varlık kontrolü
+├── ortam_yardimci.js               # Script'ler için ortak .env okuyucu
+├── dart_define_uret.js             # Derleme komutu üretir / derler
+├── sifre_testi.js                  # Şifre doğrulama testleri
+├── apk_sizinti_taramasi.js         # APK sızıntı taraması
+├── functions_kontrol.js            # Trigger varlık kontrolü
+└── ikon_uret.js                    # SVG → uygulama ikonu üretir
 ```
 
 ---
@@ -184,7 +357,7 @@ decompile edildiğinde görünür. Bu yüzden:
 
 ```bash
 flutter analyze                     # statik analiz
-flutter test                        # Dart testleri (20 test)
+flutter test                        # Dart testleri (30 test)
 node scripts/sifre_testi.js         # şifre doğrulama (12 kontrol)
 node scripts/functions_kontrol.js  # trigger'lar yüklü mü
 node scripts/apk_sizinti_taramasi.js  # APK sızıntı taraması
@@ -218,5 +391,25 @@ proje değeri barındırabilir.
   çalışabilir. Kuralların yorumlu hâli dosyanın içinde hazır bekliyor.
 - **Öğrenci girişi kimlik doğrulaması değil.** Öğrenci ID'sini bilen kişi
   o öğrencinin verisine erişir. Gerçek koruma için `firebase_auth` gerekir.
+- **Ödev reddi yok.** Yönetici görevi onaylayabilir veya hiçbir işlem
+  yapmayabilir; görev `onay_bekliyor` durumunda kalır.
+- **Teslim geçmişi tutulmaz.** Ödev gönderimi `gorevler/{id}` belgesinin
+  üzerine yazılır; önceki açıklama ve fotoğraflar kalıcı olarak ezilir.
+- **Görev durumu elle değiştirilemez.** Durum yalnız uygulama üzerinden
+  ilerler; geçmişe dönük düzenleme arayüzü yoktur.
+- **APK debug anahtarıyla imzalanır.** `android/key.properties` olmadığı için
+  Play Store'a yüklenemez. Kalıcı imza anahtarı üretilmelidir.
 - Fotoğraflar Firestore'da base64 olarak saklanır (belge limiti 1 MB).
   Çok fotoğraflı gönderimlerde bu sınıra dikkat edilmelidir.
+
+---
+
+## Lisans
+
+Bu proje [MIT Lisansı](LICENSE) ile lisanslanmıştır.
+
+**Geliştiren:** Mehmet Gökdeniz
+
+Kullanılan tüm bağımlılıklar açık kaynaklıdır ve kendi lisanslarına
+tabidir; liste için [Hakkında ekranına](lib/screens/hakkinda_ekrani.dart)
+bakabilirsiniz.

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gorev_takibi/config/uygulama_ayarlari.dart';
+import 'package:gorev_takibi/models/bildirim.dart';
 import 'package:gorev_takibi/models/gorev.dart';
 
 void main() {
@@ -162,6 +163,72 @@ void main() {
     });
   });
 
+  group('Gorev tarih araligi uyumu', () {
+    Gorev ornekGorev({DateTime? baslangic, DateTime? son}) => Gorev(
+          id: 'g1',
+          ogrenciId: 'o1',
+          baslik: 'Test',
+          baslangicTarihi: baslangic,
+          sonTarihi: son,
+        );
+
+    test('araliktaki her gun dahil olmali', () {
+      final gorev = ornekGorev(
+        baslangic: DateTime(2026, 1, 5),
+        son: DateTime(2026, 1, 12),
+      );
+
+      expect(gorev.tarihAraliginaDahilMi(DateTime(2026, 1, 5)), isTrue,
+          reason: 'Baslangic gunu dahil olmali.');
+      expect(gorev.tarihAraliginaDahilMi(DateTime(2026, 1, 8)), isTrue);
+      expect(gorev.tarihAraliginaDahilMi(DateTime(2026, 1, 12)), isTrue,
+          reason: 'Son gun dahil olmali.');
+    });
+
+    test('aralik disindaki gunler haric olmali', () {
+      final gorev = ornekGorev(
+        baslangic: DateTime(2026, 1, 5),
+        son: DateTime(2026, 1, 12),
+      );
+
+      expect(gorev.tarihAraliginaDahilMi(DateTime(2026, 1, 4)), isFalse);
+      expect(gorev.tarihAraliginaDahilMi(DateTime(2026, 1, 13)), isFalse);
+      expect(gorev.tarihAraliginaDahilMi(DateTime(2026, 6, 1)), isFalse);
+    });
+
+    test('gunun saati onemsiz olmali', () {
+      final gorev = ornekGorev(
+        baslangic: DateTime(2026, 1, 5, 8, 30),
+        son: DateTime(2026, 1, 12, 23, 45),
+      );
+
+      expect(gorev.tarihAraliginaDahilMi(DateTime(2026, 1, 5, 0, 0)), isTrue,
+          reason: 'Sabah 08:30 baslayan gorev, o gunun 00:00inda da gorunmeli.');
+    });
+
+    test('yalnizca son tarih varsa o gun sayilmali', () {
+      // Eski kayitlarda baslangic tarihi yoktur; tek tarih kullanilir.
+      final gorev = ornekGorev(son: DateTime(2026, 1, 12));
+      expect(gorev.tarihAraliginaDahilMi(DateTime(2026, 1, 12)), isTrue);
+      expect(gorev.tarihAraliginaDahilMi(DateTime(2026, 1, 11)), isFalse);
+    });
+
+    test('hicbir tarih yoksa hicbir gun sayilmamali', () {
+      expect(ornekGorev().tarihAraliginaDahilMi(DateTime(2026, 1, 12)), isFalse);
+    });
+
+    test('ters aralik veri hatasinda tek gun sayilmali', () {
+      // Baslangic son tarihten sonra gelmisse coklu gunlu aralik olusturulamaz.
+      final gorev = ornekGorev(
+        baslangic: DateTime(2026, 1, 12),
+        son: DateTime(2026, 1, 5),
+      );
+
+      expect(gorev.tarihAraliginaDahilMi(DateTime(2026, 1, 12)), isTrue);
+      expect(gorev.tarihAraliginaDahilMi(DateTime(2026, 1, 8)), isFalse);
+    });
+  });
+
   group('Gorev ozeti', () {
     test('baslik, durum ve tarih birlikte gorunmeli', () {
       final gorev = Gorev(
@@ -172,6 +239,40 @@ void main() {
         sonTarihi: DateTime(2026, 1, 12),
       );
       expect(gorev.ozet, 'Matematik Odevi — Yapılıyor • 05.01.2026 – 12.01.2026');
+    });
+  });
+
+  group('Bildirim turu cozumleme', () {
+    test('bilinen kodlar dogru tur vermeli', () {
+      expect(BildirimTuru.koddanVeya('onay_bekliyor', BildirimTuru.gorevAtanldi),
+          BildirimTuru.onayaGonderildi);
+      expect(BildirimTuru.koddanVeya('onaylandi', BildirimTuru.gorevAtanldi),
+          BildirimTuru.onaylandi);
+      expect(BildirimTuru.koddanVeya('gorev_atanldi', BildirimTuru.onayaGonderildi),
+          BildirimTuru.gorevAtanldi);
+    });
+
+    test('tur alani eksik yonetici bildirimi onaya gonderilmis sayilmali', () {
+      // `yoneticiyeBildir` `tur` degerini gecirmedigi donemde yazilan
+      // kayitlarda alan yoktur. Yonetici ekrani varsayilan olarak
+      // "Onay bekleyen" filtresinde acildigi icin bu kayitlar aksi halde
+      // gizleniyordu.
+      expect(BildirimTuru.koddanVeya(null, BildirimTuru.onayaGonderildi),
+          BildirimTuru.onayaGonderildi);
+      expect(BildirimTuru.koddanVeya('', BildirimTuru.onayaGonderildi),
+          BildirimTuru.onayaGonderildi);
+    });
+
+    test('varsayilan tur bilinmeyen kodlari da yakalamali', () {
+      expect(BildirimTuru.koddanVeya('bozuk_kod', BildirimTuru.onayaGonderildi),
+          BildirimTuru.onayaGonderildi);
+    });
+
+    test('koddan varsayilani degistirmemeli', () {
+      // Ogrenci tarafinda varsayilan tur verilmedigi icin eski davranis
+      // korunur: bilinmeyen kod "yeni gorev" sayilir.
+      expect(BildirimTuru.koddan(null), BildirimTuru.gorevAtanldi);
+      expect(BildirimTuru.koddan('onay_bekliyor'), BildirimTuru.onayaGonderildi);
     });
   });
 }

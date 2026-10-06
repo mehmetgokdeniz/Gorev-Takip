@@ -22,6 +22,25 @@ enum BildirimTuru {
         _ => BildirimTuru.gorevAtanldi,
       };
 
+  /// `tur` alanı bozuk/eksik kayıtlar için tür çözümü.
+  ///
+  /// `koddan` bilinmeyen değerleri `gorevAtanldi`'ya düşürür; bu,
+  /// eksik alanlı kayıtları da "yeni görev" gibi gösterirdi. Yönetici
+  /// bildirimlerinin tek üreticisi onaya-gönderme tetikleyicisi olduğu
+  /// için eksik alan orada `onayaGonderildi` demektir.
+  static BildirimTuru koddanVeya(String? kod, BildirimTuru varsayilan) {
+    switch (kod) {
+      case 'onay_bekliyor':
+        return BildirimTuru.onayaGonderildi;
+      case 'onaylandi':
+        return BildirimTuru.onaylandi;
+      case 'gorev_atanldi':
+        return BildirimTuru.gorevAtanldi;
+      default:
+        return varsayilan;
+    }
+  }
+
   String get etiket => switch (this) {
         BildirimTuru.gorevAtanldi => 'Yeni görev',
         BildirimTuru.onayaGonderildi => 'Onaya gönderildi',
@@ -59,11 +78,16 @@ class Bildirim {
     this.zaman,
   });
 
-  factory Bildirim.dokumandan(DocumentSnapshot<Map<String, dynamic>> snapshot) {
+  factory Bildirim.dokumandan(
+    DocumentSnapshot<Map<String, dynamic>> snapshot, {
+    BildirimTuru? turVarsayilan,
+  }) {
     final Map<String, dynamic> veri = snapshot.data() ?? const {};
     return Bildirim(
       id: snapshot.id,
-      tur: BildirimTuru.koddan(veri['tur'] as String?),
+      tur: turVarsayilan == null
+          ? BildirimTuru.koddan(veri['tur'] as String?)
+          : BildirimTuru.koddanVeya(veri['tur'] as String?, turVarsayilan),
       baslik: veri['baslik'] as String? ?? '',
       govde: veri['govde'] as String? ?? '',
       gorevId: veri['gorevId'] as String? ?? '',

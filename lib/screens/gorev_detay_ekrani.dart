@@ -1,16 +1,26 @@
-import 'dart:convert';
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../models/gorev.dart';
+import '../services/gorsel_onbellek.dart';
+
+/// Fotoğraf gösterir.
+///
+/// Önceden `Image.memory(base64Decode(...))` her karede yeniden decode
+/// ediyordu; detay ekranı bir `StreamBuilder` içinde olduğu için her veri
+/// gelişinde tüm fotoğraflar tekrar çözülüyordu. Artık çözüm bir kez
+/// yapılıp önbelleğe yazılıyor.
+Widget _gorsel(String yol, {BoxFit fit = BoxFit.cover}) {
+  if (yol.isEmpty) return const Icon(Icons.broken_image);
+  return OnbellekliGorsel(yol: yol, fit: fit);
+}
 
 /// Tek bir görevin tüm ayrıntıları.
 ///
 /// Bildirimden, öğrenci takviminden veya yönetici listesinden
 /// buraya geçilir. Başlangıç ve son tarih, durum, öğrenci notu ve
 /// gönderilen fotoğraflar tek ekranda toplanır.
-class GorevDetayEkrani extends StatelessWidget {
+class GorevDetayEkrani extends StatefulWidget {
   final String gorevId;
 
   /// Görüntülenecek görev hazırsa (bildirimden gelirken) verilir.
@@ -39,16 +49,39 @@ class GorevDetayEkrani extends StatelessWidget {
   });
 
   @override
+  State<GorevDetayEkrani> createState() => _GorevDetayEkraniState();
+}
+
+class _GorevDetayEkraniState extends State<GorevDetayEkrani> {
+  /// Görev belgesinin stream'i.
+  ///
+  /// `build()` içinde kurulursa her yeniden çizimde yeni abonelik
+  /// yapılır ve görev güncellendiğinde tekrar tetiklenir — döngü.
+  /// `onGorev` verilmişse hiç kurulmaz.
+  late final Stream<DocumentSnapshot<Map<String, dynamic>>> _gorevStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _gorevStream = FirebaseFirestore.instance
+        .collection('gorevler')
+        .doc(widget.gorevId)
+        .snapshots();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final Gorev? onGorev = widget.onGorev;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Görev Detayı', style: TextStyle(fontWeight: FontWeight.bold)),
         backgroundColor: const Color(0xFF161B22),
       ),
       body: onGorev != null
-          ? _detayGovdesi(context, onGorev!)
+          ? _detayGovdesi(context, onGorev)
           : StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-              stream: FirebaseFirestore.instance.collection('gorevler').doc(gorevId).snapshots(),
+              stream: _gorevStream,
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -170,7 +203,7 @@ class GorevDetayEkrani extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 24),
-        if (onayVerilebilir && gorev.durum == GorevDurumu.onayBekliyor)
+        if (widget.onayVerilebilir && gorev.durum == GorevDurumu.onayBekliyor)
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.green,
@@ -182,13 +215,13 @@ class GorevDetayEkrani extends StatelessWidget {
               await FirebaseFirestore.instance.collection('gorevler').doc(gorev.id).update({'durum': 'onaylandi'});
               if (!context.mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ödev onaylandı.'), backgroundColor: Colors.green));
-              onaylandi?.call();
+              widget.onaylandi?.call();
               Navigator.pop(context);
             },
             icon: const Icon(Icons.check_circle_outline),
             label: const Text('Ödevi Onayla', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ),
-        if (gonderimYapilabilir && gorev.durum == GorevDurumu.atanlandi)
+        if (widget.gonderimYapilabilir && gorev.durum == GorevDurumu.atanlandi)
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.deepPurpleAccent,
@@ -196,7 +229,7 @@ class GorevDetayEkrani extends StatelessWidget {
               minimumSize: const Size.fromHeight(50),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             ),
-            onPressed: () => onGonder?.call(context, gorev.id, gorev.baslik),
+            onPressed: () => widget.onGonder?.call(context, gorev.id, gorev.baslik),
             icon: const Icon(Icons.cloud_upload_outlined),
             label: const Text('Ödevi Gönder', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ),
@@ -277,34 +310,12 @@ class GorevDetayEkrani extends StatelessWidget {
     );
   }
 
-  Widget _gorsel(String yol) {
-    if (yol.isEmpty) return const Icon(Icons.broken_image);
-
-    if (yol.startsWith('http')) {
-      return Image.network(
-        yol,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
-      );
-    }
-
-    try {
-      return Image.memory(
-        base64Decode(yol),
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => const Icon(Icons.broken_image),
-      );
-    } catch (_) {
-      return const Icon(Icons.broken_image);
-    }
-  }
-
   void _gorseliBuyut(BuildContext context, String yol) {
     showDialog(
       context: context,
       builder: (context) => Dialog(
         backgroundColor: Colors.black,
-        child: InteractiveViewer(child: _gorsel(yol)),
+        child: InteractiveViewer(child: _gorsel(yol, fit: BoxFit.contain)),
       ),
     );
   }
