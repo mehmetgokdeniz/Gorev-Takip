@@ -66,6 +66,7 @@ flowchart LR
 - **Yönetici paneli** — öğrenci ekleme/düzenleme/silme, görev atama, fotoğraflı teslimi görüntüleme, onaylama, onaylanan ödevi silme, canlı konum takibi
 - **Öğrenci paneli** — aylık takvim görünümü (takvim / tüm görevler modu), gün bazlı filtreleme, fotoğraflı ödev gönderimi
 - **Push bildirimleri** — görev atandığında, onaya gönderildiğinde ve onaylandığında; dokununca doğrudan ilgili ödeve açar
+- **Canlı konum** — öğrenci hareket ettikçe konum güncellenir; yönetici yenileyebilir, koordinat yanında okunabilir adresi ve harita çevresini açabilir
 - **Kalıcı bildirim geçmişi** — bildirimler Firestore'a da yazılır, cihaz değişse bile kaybolmaz
 - **Hakkında ekranı** — uygulama bilgisi ve kullanılan açık kaynaklı kütüphaneler
 - **Splash ekranı** — açılışta logo animasyonu, geliştiren bilgisi

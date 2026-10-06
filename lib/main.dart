@@ -834,7 +834,9 @@ class _CanliKonumPaneliState extends State<CanliKonumPaneli> {
   /// GPS her 10 dakikada bir güncelleme yazdığı için bu ekran sık sık
   /// yeniden çizilir. `build()` içinde kurulan stream her çizimde yeni
   /// abonelik açıp eskisini bırakıyordu; `initState`'e taşındı.
-  late final Stream<DocumentSnapshot<Map<String, dynamic>>> _ogrenciStream;
+  late Stream<DocumentSnapshot<Map<String, dynamic>>> _ogrenciStream;
+  Future<String?>? _adresFuture;
+  String? _adresAnahtari;
 
   @override
   void initState() {
@@ -843,6 +845,40 @@ class _CanliKonumPaneliState extends State<CanliKonumPaneli> {
         .collection('ogrenciler')
         .doc(widget.ogrenciId)
         .snapshots();
+  }
+
+  Future<String?> _adresiGetir(double enlem, double boylam) async {
+    final uri = Uri.https('nominatim.openstreetmap.org', '/reverse', {
+      'format': 'jsonv2',
+      'lat': enlem.toString(),
+      'lon': boylam.toString(),
+      'zoom': '18',
+      'addressdetails': '1',
+      'accept-language': 'tr',
+    });
+    try {
+      final response = await http.get(uri, headers: {
+        'User-Agent': 'GorevTakip/1.0 (konum-goruntuleme)',
+      });
+      if (response.statusCode != 200) return null;
+      final veri = jsonDecode(response.body) as Map<String, dynamic>;
+      final adres = veri['display_name'] as String?;
+      return adres?.trim().isEmpty == true ? null : adres;
+    } catch (e) {
+      debugPrint('Adres alınamadı: $e');
+      return null;
+    }
+  }
+
+  void _yenile() {
+    setState(() {
+      _ogrenciStream = FirebaseFirestore.instance
+          .collection('ogrenciler')
+          .doc(widget.ogrenciId)
+          .snapshots();
+      _adresFuture = null;
+      _adresAnahtari = null;
+    });
   }
 
   Future<void> _haritadaAc(double enlem, double boylam) async {
@@ -857,7 +893,17 @@ class _CanliKonumPaneliState extends State<CanliKonumPaneli> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text('${widget.ogrenciAdi} - Canlı Konum'), backgroundColor: const Color(0xFF161B22)),
+      appBar: AppBar(
+        title: Text('${widget.ogrenciAdi} - Canlı Konum'),
+        backgroundColor: const Color(0xFF161B22),
+        actions: [
+          IconButton(
+            tooltip: 'Konumu yenile',
+            onPressed: _yenile,
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
+      ),
       body: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
         stream: _ogrenciStream,
         builder: (context, snapshot) {
@@ -867,6 +913,11 @@ class _CanliKonumPaneliState extends State<CanliKonumPaneli> {
           double enlem = (veri?['enlem'] as num?)?.toDouble() ?? 0.0;
           double boylam = (veri?['boylam'] as num?)?.toDouble() ?? 0.0;
           bool konumKapali = (enlem == 0.0 && boylam == 0.0);
+          final adresAnahtari = '$enlem,$boylam';
+          if (!konumKapali && adresAnahtari != _adresAnahtari) {
+            _adresAnahtari = adresAnahtari;
+            _adresFuture = _adresiGetir(enlem, boylam);
+          }
 
           return Center(
             child: Padding(
@@ -903,6 +954,35 @@ class _CanliKonumPaneliState extends State<CanliKonumPaneli> {
                       ),
                     ),
                   ),
+                  if (!konumKapali) ...[
+                    const SizedBox(height: 12),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: FutureBuilder<String?>(
+                          future: _adresFuture,
+                          builder: (context, adresSnapshot) {
+                            final adres = adresSnapshot.data;
+                            return Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(Icons.place_rounded, color: Colors.orangeAccent),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    adresSnapshot.connectionState == ConnectionState.waiting
+                                        ? 'Adres alınıyor...'
+                                        : adres ?? 'Adres bulunamadı; haritada çevreyi görüntüleyebilirsiniz.',
+                                    style: const TextStyle(fontSize: 14, height: 1.35),
+                                  ),
+                                ),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 32),
                   if (!konumKapali)
                     SizedBox(
@@ -912,7 +992,7 @@ class _CanliKonumPaneliState extends State<CanliKonumPaneli> {
                         style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                         onPressed: () => _haritadaAc(enlem, boylam),
                         icon: const Icon(Icons.map_rounded),
-                        label: const Text('Haritada Aç & Yol Tarifi Al', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        label: const Text('Haritada Aç & Çevreyi Gör', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                       ),
                     ),
                 ],
@@ -1339,9 +1419,8 @@ class _OgrenciPaneliState extends State<OgrenciPaneli> {
   final CollectionReference<Map<String, dynamic>> _ogrencilerKoleksiyonu =
       FirebaseFirestore.instance.collection('ogrenciler');
 
-  static const Duration gpsGuncellemeAraligi = Duration(minutes: 10);
-
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _ogrenciSubscription;
+  StreamSubscription<Position>? _gpsAbonelik;
 
   /// Takvim renklendirmesini besleyen görev aboneliği.
   ///
@@ -1351,8 +1430,6 @@ class _OgrenciPaneliState extends State<OgrenciPaneli> {
   /// oturum değişiminde birikiyordu — oturum değiştirme kasmasının
   /// başlıca nedeni buydu.
   StreamSubscription<List<Gorev>>? _gorevlerAbonelik;
-  Timer? _gpsZamanlayici;
-
   /// Görev listesi — `initState`'te bir kez kurulur, `build()` içinde değil.
   ///
   /// Önceden `build()` gövdesinde oluşturuluyordu; her yeniden çizimde
@@ -1596,7 +1673,7 @@ class _OgrenciPaneliState extends State<OgrenciPaneli> {
     _pageController.dispose();
     _ogrenciSubscription?.cancel();
     _gorevlerAbonelik?.cancel();
-    _gpsZamanlayici?.cancel();
+    _gpsAbonelik?.cancel();
     _bildirim.abonelikleriIptalEt();
     super.dispose();
   }
@@ -1642,9 +1719,14 @@ class _OgrenciPaneliState extends State<OgrenciPaneli> {
         return;
       }
 
-      _gpsZamanlayici?.cancel();
-      _gpsZamanlayici = Timer.periodic(gpsGuncellemeAraligi, (_) => _konumuFirestoreYaz());
       await _konumuFirestoreYaz();
+      await _gpsAbonelik?.cancel();
+      _gpsAbonelik = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          distanceFilter: 20,
+        ),
+      ).listen((_) => _konumuFirestoreYaz());
     } catch (e) {
       debugPrint("Konum hatası: $e");
     }

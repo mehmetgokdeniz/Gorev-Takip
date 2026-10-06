@@ -33,6 +33,7 @@ class _SplashEkraniState extends State<SplashEkrani>
       duration: const Duration(milliseconds: 900),
     );
     _buyume = CurvedAnimation(parent: _kontrolcu, curve: Curves.easeOutBack);
+    _kontrolcu.forward();
 
     // Sabit süre sonra asıl ekrana geç.
     Future.delayed(const Duration(milliseconds: 1500), () {
@@ -84,12 +85,18 @@ class _SplashEkraniState extends State<SplashEkrani>
               ),
               const SizedBox(height: 28),
               const Text(
-                UygulamaBilgisi.uygulamaAdi,
+                UygulamaBilgisi.tamAd,
                 style: TextStyle(
                   fontSize: 26,
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1,
                 ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Görevlerini planla, takip et, tamamla',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white70, fontSize: 14),
               ),
               const SizedBox(height: 8),
               Text(
